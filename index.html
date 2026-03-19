@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GT Coach — WebGPU Voice Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4ea;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    /* Header + action area */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .top-bar-left h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .top-bar-left p {
+      font-size: 13px;
+      color: #8b8fa3;
+      margin-top: 4px;
+    }
+    .top-bar-right {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-green { background: #22c55e; color: #fff; }
+    .btn-blue { background: #3b82f6; color: #fff; }
+    .btn-sm { padding: 8px 14px; font-size: 13px; }
+
+    /* Result banner */
+    .result-banner {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: none;
+      text-align: center;
+    }
+    .result-banner.pass { display: block; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3); color: #4ade80; }
+    .result-banner.fail { display: block; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: #f87171; }
+    .result-banner.error { display: block; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24; }
+
+    /* Progress */
+    .progress-row {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .progress-row.visible { display: flex; }
+    .progress-track {
+      flex: 1;
+      height: 5px;
+      background: #2a2d3a;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #6366f1;
+      border-radius: 3px;
+      transition: width 0.3s;
+      width: 0%;
+    }
+    .progress-label {
+      font-size: 12px;
+      color: #8b8fa3;
+      white-space: nowrap;
+    }
+
+    /* Two-column grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .card h2 {
+      font-size: 12px;
+      font-weight: 600;
+      color: #6366f1;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .label { color: #8b8fa3; }
+    .val { color: #e1e4ea; font-weight: 500; text-align: right; }
+    .val.good { color: #4ade80; }
+    .val.bad { color: #f87171; }
+    .val.warn { color: #fbbf24; }
+    .val.loading { color: #60a5fa; }
+    .val.muted { color: #555; }
+
+    /* NCC bar */
+    .ncc-row { margin-top: 6px; }
+    .ncc-bar {
+      position: relative;
+      width: 100%;
+      height: 16px;
+      background: linear-gradient(to right, #f87171 0%, #fbbf24 50%, #4ade80 85%, #4ade80 100%);
+      border-radius: 3px;
+      margin: 4px 0 2px;
+    }
+    .ncc-marker {
+      position: absolute;
+      top: -3px;
+      width: 3px;
+      height: 22px;
+      background: #fff;
+      border-radius: 2px;
+      transform: translateX(-50%);
+      box-shadow: 0 0 6px rgba(255,255,255,0.5);
+    }
+    .ncc-threshold {
+      position: absolute;
+      top: 0;
+      width: 1px;
+      height: 16px;
+      background: rgba(255,255,255,0.4);
+      transform: translateX(-50%);
+    }
+    .ncc-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: #555;
+    }
+
+    .full-width { grid-column: 1 / -1; }
+
+    .footer {
+      text-align: center;
+      font-size: 11px;
+      color: #444;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+    .footer a { color: #6366f1; text-decoration: none; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Top bar: title + buttons -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <h1>GT Coach — WebGPU Voice Test</h1>
+        <p>Checks if your GPU runs the enhanced Kokoro TTS correctly. Takes ~30–60s. Please screenshot results.</p>
+      </div>
+      <div class="top-bar-right">
+        <button class="btn btn-green btn-sm hidden" id="play-gpu-btn">Play WebGPU</button>
+        <button class="btn btn-blue btn-sm hidden" id="play-wasm-btn">Play WASM</button>
+        <button class="btn btn-primary" id="run-btn" disabled>Checking WebGPU...</button>
+      </div>
+    </div>
+
+    <!-- Result banner -->
+    <div class="result-banner" id="result-banner"></div>
+
+    <!-- Progress -->
+    <div class="progress-row" id="progress-row">
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="progress-label" id="status">Loading...</span>
+    </div>
+
+    <!-- Cards grid -->
+    <div class="grid">
+      <!-- Environment -->
+      <div class="card">
+        <h2>Environment</h2>
+        <div class="row"><span class="label">Browser</span><span class="val" id="env-browser">—</span></div>
+        <div class="row"><span class="label">Platform</span><span class="val" id="env-platform">—</span></div>
+        <div class="row"><span class="label">Screen</span><span class="val" id="env-screen">—</span></div>
+      </div>
+
+      <!-- GPU -->
+      <div class="card">
+        <h2>GPU</h2>
+        <div class="row"><span class="label">WebGPU</span><span class="val" id="gpu-available">Checking...</span></div>
+        <div class="row"><span class="label">Vendor</span><span class="val" id="gpu-vendor">—</span></div>
+        <div class="row"><span class="label">Architecture</span><span class="val" id="gpu-arch">—</span></div>
+        <div class="row"><span class="label">Device</span><span class="val" id="gpu-device">—</span></div>
+      </div>
+
+      <!-- WebGPU results -->
+      <div class="card">
+        <h2>WebGPU</h2>
+        <div class="row"><span class="label">Model</span><span class="val" id="model-status">Not loaded</span></div>
+        <div class="row"><span class="label">Warm-up</span><span class="val" id="gpu-warmup">—</span></div>
+        <div class="row"><span class="label">Generation</span><span class="val" id="gpu-gen-time">—</span></div>
+        <div class="row"><span class="label">Speed (RTF)</span><span class="val" id="gpu-rtf">—</span></div>
+        <div class="row"><span class="label">Samples</span><span class="val" id="gpu-samples">—</span></div>
+        <div class="row"><span class="label">RMS energy</span><span class="val" id="gpu-rms">—</span></div>
+      </div>
+
+      <!-- WASM results -->
+      <div class="card">
+        <h2>WASM (CPU Reference)</h2>
+        <div class="row"><span class="label">Model load</span><span class="val" id="wasm-load-time">—</span></div>
+        <div class="row"><span class="label">Generation</span><span class="val" id="wasm-gen-time">—</span></div>
+        <div class="row"><span class="label">Speed (RTF)</span><span class="val" id="wasm-rtf">—</span></div>
+        <div class="row"><span class="label">Samples</span><span class="val" id="wasm-samples">—</span></div>
+        <div class="row"><span class="label">RMS energy</span><span class="val" id="wasm-rms">—</span></div>
+      </div>
+
+      <!-- Quality comparison (full width) -->
+      <div class="card full-width">
+        <h2>Audio Quality Comparison</h2>
+        <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <div class="row"><span class="label">Cross-correlation (NCC)</span><span class="val" id="ncc-value">—</span></div>
+            <div class="row"><span class="label">Sample count match</span><span class="val" id="sample-match">—</span></div>
+            <div class="row"><span class="label">RMS difference</span><span class="val" id="rms-diff">—</span></div>
+            <div class="row"><span class="label">Total test time</span><span class="val" id="total-duration">—</span></div>
+          </div>
+          <div style="flex: 1; min-width: 200px;" id="ncc-visual" class="hidden">
+            <div style="font-size: 12px; color: #8b8fa3; margin-bottom: 4px;">Quality gate</div>
+            <div class="ncc-bar">
+              <div class="ncc-threshold" style="left: 85%"></div>
+              <div class="ncc-marker" id="ncc-marker"></div>
+            </div>
+            <div class="ncc-labels">
+              <span>0 (corrupted)</span>
+              <span>0.85</span>
+              <span>1.0 (perfect)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>kokoro-js 1.2.1 &middot; transformers.js 4.0.0-next.8 &middot; onnxruntime-web 1.25.0-dev.20260307</span><br>
+      Test phrase: "Brake earlier into turn 3, you are losing time on entry"
+    </div>
+  </div>
+
+  <script type="module">
+    const KOKORO_CDN = 'https://esm.sh/kokoro-js@1.2.1?deps=@huggingface/transformers@4.0.0-next.8';
+    const TEST_PHRASE = 'Brake earlier into turn 3, you are losing time on entry';
+    const SAMPLE_RATE = 24000;
+    const $ = (id) => document.getElementById(id);
+
+    let gpuAudioData = null, wasmAudioData = null;
+
+    function detectEnvironment() {
+      const ua = navigator.userAgent;
+      let browser = 'Unknown';
+      if (ua.includes('Edg/')) browser = 'Edge ' + ua.match(/Edg\/([\d.]+)/)?.[1];
+      else if (ua.includes('Chrome/')) browser = 'Chrome ' + ua.match(/Chrome\/([\d.]+)/)?.[1];
+      else if (ua.includes('Firefox/')) browser = 'Firefox ' + ua.match(/Firefox\/([\d.]+)/)?.[1];
+      else if (ua.includes('Safari/') && !ua.includes('Chrome')) browser = 'Safari ' + ua.match(/Version\/([\d.]+)/)?.[1];
+      $('env-browser').textContent = browser;
+      $('env-platform').textContent = navigator.platform + (navigator.userAgentData?.platform ? ` (${navigator.userAgentData.platform})` : '');
+      $('env-screen').textContent = `${screen.width}x${screen.height} @ ${devicePixelRatio}x`;
+    }
+
+    async function detectGpu() {
+      if (!navigator.gpu) {
+        $('gpu-available').textContent = 'Not available';
+        $('gpu-available').className = 'val bad';
+        $('run-btn').textContent = 'WebGPU not supported';
+        return;
+      }
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) { $('gpu-available').textContent = 'No adapter'; $('gpu-available').className = 'val bad'; $('run-btn').textContent = 'No WebGPU adapter'; return; }
+        const info = adapter.info;
+        $('gpu-available').textContent = 'Available'; $('gpu-available').className = 'val good';
+        $('gpu-vendor').textContent = info.vendor || '?';
+        $('gpu-arch').textContent = info.architecture || '?';
+        $('gpu-device').textContent = info.device || '?';
+        $('run-btn').textContent = 'Run Voice Test';
+        $('run-btn').disabled = false;
+      } catch (e) {
+        $('gpu-available').textContent = e.message; $('gpu-available').className = 'val bad';
+        $('run-btn').textContent = 'GPU error';
+      }
+    }
+
+    function rmsEnergy(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]*a[i]; return Math.sqrt(s / a.length); }
+
+    function ncc(a, b) {
+      const mx = Math.max(a.length, b.length); if (mx === 0) return 0;
+      const mn = Math.min(a.length, b.length); if (mn / mx < 0.9) return 0;
+      let sA=0,sB=0; for (let i=0;i<mn;i++){sA+=a[i];sB+=b[i];}
+      const mA=sA/mn,mB=sB/mn; let cc=0,vA=0,vB=0;
+      for (let i=0;i<mn;i++){const da=a[i]-mA,db=b[i]-mB;cc+=da*db;vA+=da*da;vB+=db*db;}
+      const d=Math.sqrt(vA*vB); return d===0?0:cc/d;
+    }
+
+    function fmt(ms) { return ms < 1000 ? ms.toFixed(0)+'ms' : (ms/1000).toFixed(1)+'s'; }
+
+    function play(audio) {
+      const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      const buf = ctx.createBuffer(1, audio.length, SAMPLE_RATE);
+      buf.copyToChannel(audio, 0);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      src.connect(ctx.destination); src.start();
+    }
+
+    function setStatus(t) { $('status').textContent = t; }
+
+    async function runTest() {
+      const t0 = performance.now();
+      $('run-btn').disabled = true; $('run-btn').textContent = 'Running...';
+      $('play-gpu-btn').classList.add('hidden'); $('play-wasm-btn').classList.add('hidden');
+      $('result-banner').className = 'result-banner'; $('ncc-visual').classList.add('hidden');
+      $('progress-row').classList.add('visible');
+      gpuAudioData = wasmAudioData = null;
+
+      try {
+        setStatus('Loading Kokoro model (first run downloads ~330MB)...');
+        $('model-status').textContent = 'Downloading...'; $('model-status').className = 'val loading';
+
+        const { KokoroTTS } = await import(KOKORO_CDN);
+        const model = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+          dtype: 'fp32', device: 'webgpu',
+          progress_callback: (e) => {
+            if (e.status === 'progress' && e.progress != null) {
+              $('progress-fill').style.width = Math.round(e.progress) + '%';
+              setStatus(`Downloading${e.file ? ' '+e.file : ''}... ${Math.round(e.progress)}%`);
+            }
+          },
+        });
+        $('model-status').textContent = 'Loaded (fp32)'; $('model-status').className = 'val good';
+        $('progress-fill').style.width = '100%';
+
+        // Warm-up
+        setStatus('Warming up WebGPU...');
+        const w0 = performance.now();
+        await model.generate('test', { voice: 'am_adam' });
+        $('gpu-warmup').textContent = fmt(performance.now() - w0);
+
+        // WebGPU generate
+        setStatus('Generating with WebGPU...');
+        const g0 = performance.now();
+        const gr = await model.generate(TEST_PHRASE, { voice: 'am_adam' });
+        const gMs = performance.now() - g0;
+        gpuAudioData = gr.audio;
+        const gDur = gpuAudioData.length / SAMPLE_RATE;
+        const gRtf = gDur / (gMs / 1000);
+        const gRms = rmsEnergy(gpuAudioData);
+        $('gpu-gen-time').textContent = `${fmt(gMs)} (${gDur.toFixed(2)}s audio)`;
+        $('gpu-rtf').textContent = gRtf.toFixed(2)+'x'; $('gpu-rtf').className = 'val '+(gRtf>=1.5?'good':gRtf>=1?'warn':'bad');
+        $('gpu-samples').textContent = gpuAudioData.length.toLocaleString();
+        $('gpu-rms').textContent = gRms.toFixed(6); $('gpu-rms').className = 'val '+(gRms>0.01&&gRms<0.5?'good':'warn');
+
+        // WASM load + generate
+        setStatus('Loading WASM model...');
+        const wl0 = performance.now();
+        const wm = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'fp32', device: 'wasm' });
+        $('wasm-load-time').textContent = fmt(performance.now() - wl0);
+
+        setStatus('Generating WASM reference (slower, please wait)...');
+        const wg0 = performance.now();
+        const wr = await wm.generate(TEST_PHRASE, { voice: 'am_adam' });
+        const wMs = performance.now() - wg0;
+        wasmAudioData = wr.audio;
+        const wDur = wasmAudioData.length / SAMPLE_RATE;
+        const wRtf = wDur / (wMs / 1000);
+        const wRms = rmsEnergy(wasmAudioData);
+        $('wasm-gen-time').textContent = `${fmt(wMs)} (${wDur.toFixed(2)}s audio)`;
+        $('wasm-rtf').textContent = wRtf.toFixed(2)+'x'; $('wasm-rtf').className = 'val '+(wRtf>=0.8?'good':'warn');
+        $('wasm-samples').textContent = wasmAudioData.length.toLocaleString();
+        $('wasm-rms').textContent = wRms.toFixed(6); $('wasm-rms').className = 'val '+(wRms>0.01&&wRms<0.5?'good':'warn');
+
+        // Compare
+        setStatus('Comparing...');
+        const score = ncc(gpuAudioData, wasmAudioData);
+        const pass = score >= 0.85;
+        const match = gpuAudioData.length === wasmAudioData.length;
+        const ratio = Math.min(gpuAudioData.length, wasmAudioData.length)/Math.max(gpuAudioData.length, wasmAudioData.length);
+        const rmsDiff = Math.abs(gRms - wRms);
+
+        $('ncc-value').textContent = score.toFixed(4); $('ncc-value').className = 'val '+(pass?'good':'bad');
+        $('sample-match').textContent = match ? 'Yes' : `No (ratio: ${ratio.toFixed(3)})`;
+        $('sample-match').className = 'val '+(match?'good':ratio>0.95?'warn':'bad');
+        $('rms-diff').textContent = rmsDiff.toFixed(6); $('rms-diff').className = 'val '+(rmsDiff<0.01?'good':rmsDiff<0.05?'warn':'bad');
+        $('total-duration').textContent = fmt(performance.now() - t0);
+
+        $('ncc-visual').classList.remove('hidden');
+        $('ncc-marker').style.left = Math.max(0,Math.min(100,score*100))+'%';
+
+        if (pass) {
+          $('result-banner').className = 'result-banner pass';
+          $('result-banner').textContent = 'PASS — Your GPU produces correct audio. Enhanced voice works on this hardware.';
+        } else {
+          $('result-banner').className = 'result-banner fail';
+          $('result-banner').textContent = 'FAIL — Your GPU produces corrupted audio. Enhanced voice will sound garbled.';
+        }
+        setStatus('Done. Play both audio samples to compare.');
+        $('play-gpu-btn').classList.remove('hidden'); $('play-wasm-btn').classList.remove('hidden');
+
+      } catch (e) {
+        console.error(e);
+        $('result-banner').className = 'result-banner error';
+        $('result-banner').textContent = 'Error: ' + e.message;
+        setStatus(''); $('model-status').textContent = 'Error'; $('model-status').className = 'val bad';
+        $('total-duration').textContent = fmt(performance.now() - t0);
+      }
+      $('run-btn').textContent = 'Run Again'; $('run-btn').disabled = false;
+      $('progress-row').classList.remove('visible');
+    }
+
+    $('run-btn').addEventListener('click', runTest);
+    $('play-gpu-btn').addEventListener('click', () => gpuAudioData && play(gpuAudioData));
+    $('play-wasm-btn').addEventListener('click', () => wasmAudioData && play(wasmAudioData));
+    detectEnvironment(); detectGpu();
+  </script>
+</body>
+</html>
