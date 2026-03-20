@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:cpu": "node cpu-test.mjs"
+    "test:cpu": "node cpu-test.mjs",
+    "benchmark": "node benchmark.mjs"
   },
   "engines": {
     "node": ">=18"
