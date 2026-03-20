@@ -1,0 +1,16 @@
+{
+  "name": "gpu-voice-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:cpu": "node cpu-test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "kokoro-js": "^1.2.1",
+    "onnxruntime-node": "1.21.0"
+  }
+}
