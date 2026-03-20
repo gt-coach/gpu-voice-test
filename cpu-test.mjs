@@ -7,11 +7,20 @@ const VOICE = "am_adam";
 const BENCHMARK_TEXT =
   "Brake earlier into turn 3, you are losing time on entry";
 
+const VALID_DTYPES = ["fp32", "fp16", "q8", "q4", "q4f16"];
+const dtype = process.argv[2] || "fp32";
+if (!VALID_DTYPES.includes(dtype)) {
+  console.error(`Unknown dtype: ${dtype}`);
+  console.error(`Valid options: ${VALID_DTYPES.join(", ")}`);
+  process.exit(1);
+}
+
 // ── System info ──────────────────────────────────────────────────────
 console.log("=== Kokoro TTS CPU Test ===");
 console.log(`Platform: ${os.platform()} ${os.arch()}`);
 console.log(`CPU:      ${os.cpus()[0].model}`);
 console.log(`Node:     ${process.version}`);
+console.log(`Dtype:    ${dtype}`);
 console.log();
 
 // ── Load model ───────────────────────────────────────────────────────
@@ -20,7 +29,7 @@ const loadStart = performance.now();
 const model = await KokoroTTS.from_pretrained(
   "onnx-community/Kokoro-82M-v1.0-ONNX",
   {
-    dtype: "fp32",
+    dtype,
     device: "cpu",
     progress_callback: (progress) => {
       if (progress.status === "progress" && progress.progress != null) {
