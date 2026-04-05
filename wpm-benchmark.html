@@ -201,6 +201,21 @@
       </div>
     </div>
 
+    <!-- Speed slider -->
+    <div class="card" style="margin-bottom: 12px;">
+      <h2>Voice Speed</h2>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
+          style="flex: 1; accent-color: #6366f1;">
+        <span id="speed-value" style="font-size: 20px; font-weight: 700; color: #fff; min-width: 50px; text-align: right;">1.0x</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-top: 4px;">
+        <span>0.5x (slow)</span>
+        <span>1.0x (default)</span>
+        <span>2.0x (fast)</span>
+      </div>
+    </div>
+
     <div class="error-banner" id="error-banner"></div>
 
     <div class="progress-row" id="progress-row">
@@ -385,7 +400,8 @@
       setStatus('Connecting to server...');
       setProgress(0);
 
-      const eventSource = new EventSource('/api/wpm');
+      const speed = parseFloat($('speed-slider').value);
+      const eventSource = new EventSource(`/api/wpm?speed=${speed}`);
 
       eventSource.addEventListener('progress', (e) => {
         const data = JSON.parse(e.data);
@@ -430,6 +446,10 @@
 
     // ── Event listeners ──────────────────────────────────────────
     $('run-btn').addEventListener('click', runBenchmark);
+
+    $('speed-slider').addEventListener('input', () => {
+      $('speed-value').textContent = parseFloat($('speed-slider').value).toFixed(1) + 'x';
+    });
 
     $('detail-toggle').addEventListener('click', () => {
       const detail = $('detail-table');

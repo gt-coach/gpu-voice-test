@@ -66,6 +66,7 @@ async function handleGenerate(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const text = url.searchParams.get('text');
   const voice = url.searchParams.get('voice') || 'am_adam';
+  const speed = Math.max(0.5, Math.min(2.0, parseFloat(url.searchParams.get('speed') || '1')));
 
   if (!text) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -76,7 +77,7 @@ async function handleGenerate(req, res) {
   try {
     const m = await getModel();
     const start = performance.now();
-    const result = await m.generate(text, { voice });
+    const result = await m.generate(text, { voice, speed });
     const genTimeMs = performance.now() - start;
 
     const audio = result.audio;
@@ -108,6 +109,9 @@ async function handleGenerate(req, res) {
 
 // ── API: WPM benchmark (SSE) ────────────────────────────────────────
 async function handleWpm(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const speed = Math.max(0.5, Math.min(2.0, parseFloat(url.searchParams.get('speed') || '1')));
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -122,6 +126,8 @@ async function handleWpm(req, res) {
   try {
     const m = await getModel();
 
+    send('progress', { status: `Speed: ${speed.toFixed(1)}x`, done: 0, total: 0 });
+
     const total = VOICES.length * SENTENCES.length;
     let done = 0;
     const results = [];
@@ -129,7 +135,7 @@ async function handleWpm(req, res) {
     for (const voice of VOICES) {
       // Warm up each voice
       send('progress', { status: `Warming up ${voice.label}...`, done, total });
-      await m.generate('test', { voice: voice.id });
+      await m.generate('test', { voice: voice.id, speed });
 
       for (const sentence of SENTENCES) {
         if (req.destroyed) return; // Client disconnected
@@ -140,7 +146,7 @@ async function handleWpm(req, res) {
           total,
         });
 
-        const result = await m.generate(sentence.text, { voice: voice.id });
+        const result = await m.generate(sentence.text, { voice: voice.id, speed });
         const audioDurationSec = result.audio.length / SAMPLE_RATE;
         const wpm = (sentence.wordCount / audioDurationSec) * 60;
 
