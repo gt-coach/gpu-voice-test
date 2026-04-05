@@ -201,6 +201,7 @@
       <div class="top-bar-right">
         <button class="btn btn-green btn-sm hidden" id="play-gpu-btn">Play WebGPU</button>
         <button class="btn btn-blue btn-sm hidden" id="play-wasm-btn">Play WASM</button>
+        <button class="btn btn-sm hidden" id="play-cpu-btn" style="background:#a855f7;color:#fff">Play CPU</button>
         <button class="btn btn-primary" id="run-btn" disabled>Checking WebGPU...</button>
       </div>
     </div>
@@ -254,6 +255,16 @@
         <div class="row"><span class="label">RMS energy</span><span class="val" id="wasm-rms">—</span></div>
       </div>
 
+      <!-- CPU (Node) results — only visible when served from server.mjs -->
+      <div class="card hidden" id="cpu-card">
+        <h2>CPU (Node)</h2>
+        <div class="row"><span class="label">Server</span><span class="val" id="cpu-server">Checking...</span></div>
+        <div class="row"><span class="label">Generation</span><span class="val" id="cpu-gen-time">—</span></div>
+        <div class="row"><span class="label">Speed (RTF)</span><span class="val" id="cpu-rtf">—</span></div>
+        <div class="row"><span class="label">Samples</span><span class="val" id="cpu-samples">—</span></div>
+        <div class="row"><span class="label">RMS energy</span><span class="val" id="cpu-rms">—</span></div>
+      </div>
+
       <!-- Quality comparison (full width) -->
       <div class="card full-width">
         <h2>Audio Quality Comparison</h2>
@@ -282,7 +293,8 @@
 
     <div class="footer">
       <span>kokoro-js 1.2.1 &middot; transformers.js 4.0.0-next.8 &middot; onnxruntime-web 1.25.0-dev.20260307</span><br>
-      Test phrase: "Brake earlier into turn 3, you are losing time on entry"
+      Test phrase: "Brake earlier into turn 3, you are losing time on entry"<br>
+      <a href="/wpm-benchmark.html">WPM Calibration Benchmark</a>
     </div>
   </div>
 
@@ -292,7 +304,8 @@
     const SAMPLE_RATE = 24000;
     const $ = (id) => document.getElementById(id);
 
-    let gpuAudioData = null, wasmAudioData = null;
+    let gpuAudioData = null, wasmAudioData = null, cpuAudioData = null;
+    let serverAvailable = false;
 
     function detectEnvironment() {
       const ua = navigator.userAgent;
@@ -352,13 +365,54 @@
 
     function setStatus(t) { $('status').textContent = t; }
 
+    async function detectServer() {
+      try {
+        const res = await fetch('/api/generate?text=test&voice=am_adam', { signal: AbortSignal.timeout(5000) });
+        if (res.ok) {
+          serverAvailable = true;
+          $('cpu-card').classList.remove('hidden');
+          $('cpu-server').textContent = 'Connected';
+          $('cpu-server').className = 'val good';
+        }
+      } catch {
+        // No server — CPU card stays hidden
+      }
+    }
+
+    async function runCpuTest() {
+      setStatus('Generating with CPU (Node server)...');
+      $('cpu-gen-time').textContent = '...'; $('cpu-gen-time').className = 'val loading';
+      try {
+        const t0 = performance.now();
+        const res = await fetch(`/api/generate?text=${encodeURIComponent(TEST_PHRASE)}&voice=am_adam`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        // Decode base64 Float32Array
+        const buf = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+        cpuAudioData = new Float32Array(buf.buffer);
+
+        $('cpu-gen-time').textContent = `${data.genTimeMs}ms (${data.audioDurationSec.toFixed(2)}s audio)`;
+        $('cpu-gen-time').className = 'val';
+        $('cpu-rtf').textContent = data.rtf.toFixed(2) + 'x';
+        $('cpu-rtf').className = 'val ' + (data.rtf >= 1.5 ? 'good' : data.rtf >= 1 ? 'warn' : 'bad');
+        $('cpu-samples').textContent = data.samples.toLocaleString();
+        $('cpu-rms').textContent = data.rms.toFixed(6);
+        $('cpu-rms').className = 'val ' + (data.rms > 0.01 && data.rms < 0.5 ? 'good' : 'warn');
+        $('play-cpu-btn').classList.remove('hidden');
+      } catch (e) {
+        $('cpu-gen-time').textContent = 'Error: ' + e.message;
+        $('cpu-gen-time').className = 'val bad';
+      }
+    }
+
     async function runTest() {
       const t0 = performance.now();
       $('run-btn').disabled = true; $('run-btn').textContent = 'Running...';
-      $('play-gpu-btn').classList.add('hidden'); $('play-wasm-btn').classList.add('hidden');
+      $('play-gpu-btn').classList.add('hidden'); $('play-wasm-btn').classList.add('hidden'); $('play-cpu-btn').classList.add('hidden');
       $('result-banner').className = 'result-banner'; $('ncc-visual').classList.add('hidden');
       $('progress-row').classList.add('visible');
-      gpuAudioData = wasmAudioData = null;
+      gpuAudioData = wasmAudioData = cpuAudioData = null;
 
       try {
         setStatus('Loading Kokoro model (first run downloads ~330MB)...');
@@ -433,6 +487,11 @@
         $('ncc-visual').classList.remove('hidden');
         $('ncc-marker').style.left = Math.max(0,Math.min(100,score*100))+'%';
 
+        // CPU test (if server available)
+        if (serverAvailable) {
+          await runCpuTest();
+        }
+
         if (pass) {
           $('result-banner').className = 'result-banner pass';
           $('result-banner').textContent = 'PASS — Your GPU produces correct audio. Enhanced voice works on this hardware.';
@@ -440,7 +499,7 @@
           $('result-banner').className = 'result-banner fail';
           $('result-banner').textContent = 'FAIL — Your GPU produces corrupted audio. Enhanced voice will sound garbled.';
         }
-        setStatus('Done. Play both audio samples to compare.');
+        setStatus('Done. Play audio samples to compare.');
         $('play-gpu-btn').classList.remove('hidden'); $('play-wasm-btn').classList.remove('hidden');
 
       } catch (e) {
@@ -457,7 +516,8 @@
     $('run-btn').addEventListener('click', runTest);
     $('play-gpu-btn').addEventListener('click', () => gpuAudioData && play(gpuAudioData));
     $('play-wasm-btn').addEventListener('click', () => wasmAudioData && play(wasmAudioData));
-    detectEnvironment(); detectGpu();
+    $('play-cpu-btn').addEventListener('click', () => cpuAudioData && play(cpuAudioData));
+    detectEnvironment(); detectGpu(); detectServer();
   </script>
 </body>
 </html>

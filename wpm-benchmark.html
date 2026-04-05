@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GT Coach — Voice WPM Calibration</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4ea;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    /* Header */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .top-bar-left h1 { font-size: 20px; font-weight: 600; color: #fff; }
+    .top-bar-left p { font-size: 13px; color: #8b8fa3; margin-top: 4px; }
+    .top-bar-right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    nav { margin-bottom: 16px; font-size: 13px; }
+    nav a { color: #6366f1; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #6366f1; color: #fff; }
+
+    /* Progress */
+    .progress-row {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .progress-row.visible { display: flex; }
+    .progress-track {
+      flex: 1;
+      height: 5px;
+      background: #2a2d3a;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #6366f1;
+      border-radius: 3px;
+      transition: width 0.3s;
+      width: 0%;
+    }
+    .progress-label {
+      font-size: 12px;
+      color: #8b8fa3;
+      white-space: nowrap;
+      min-width: 120px;
+      text-align: right;
+    }
+
+    /* Cards */
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .card h2 {
+      font-size: 12px;
+      font-weight: 600;
+      color: #6366f1;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    /* Results table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 8px 12px;
+      text-align: right;
+      border-bottom: 1px solid #2a2d3a;
+    }
+    th { color: #8b8fa3; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    th:first-child, td:first-child { text-align: left; }
+    td.val { color: #e1e4ea; font-weight: 500; font-variant-numeric: tabular-nums; }
+    td.highlight { color: #4ade80; font-weight: 600; }
+    td.muted { color: #555; }
+
+    /* Summary row */
+    tr.summary-row td {
+      border-top: 2px solid #6366f1;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    /* Detail toggle */
+    .detail-toggle {
+      background: none;
+      border: none;
+      color: #6366f1;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 4px 0;
+      margin-top: 8px;
+    }
+    .detail-toggle:hover { text-decoration: underline; }
+
+    .detail-table { display: none; margin-top: 8px; }
+    .detail-table.visible { display: block; }
+    .detail-table table { font-size: 12px; }
+    .detail-table td { color: #8b8fa3; }
+    .detail-table td.val { color: #e1e4ea; }
+
+    /* Summary card */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+    .summary-stat {
+      text-align: center;
+      padding: 12px;
+      background: #0f1117;
+      border-radius: 8px;
+    }
+    .summary-stat .number {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary-stat .label {
+      font-size: 11px;
+      color: #8b8fa3;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 11px;
+      color: #444;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+    .footer a { color: #6366f1; text-decoration: none; }
+
+    .hidden { display: none !important; }
+    .error-banner {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      color: #f87171;
+      display: none;
+    }
+    .error-banner.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav><a href="/">Voice Test</a> / WPM Calibration</nav>
+
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <h1>Voice WPM Calibration</h1>
+        <p>Measures speaking rate for each Kokoro voice across cue, compact, and full coaching messages.</p>
+      </div>
+      <div class="top-bar-right">
+        <button class="btn btn-primary" id="run-btn">Run Benchmark</button>
+      </div>
+    </div>
+
+    <div class="error-banner" id="error-banner"></div>
+
+    <div class="progress-row" id="progress-row">
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <span class="progress-label" id="status">Loading...</span>
+    </div>
+
+    <!-- Summary card (hidden until results) -->
+    <div class="card hidden" id="summary-card">
+      <h2>Summary</h2>
+      <div class="summary-grid" id="summary-grid"></div>
+    </div>
+
+    <!-- WPM results table -->
+    <div class="card">
+      <h2>Words Per Minute by Voice</h2>
+      <table id="wpm-table">
+        <thead>
+          <tr>
+            <th>Voice</th>
+            <th>Cue</th>
+            <th>Compact</th>
+            <th>Full</th>
+            <th>Overall</th>
+          </tr>
+        </thead>
+        <tbody id="wpm-tbody">
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Per-sentence detail -->
+    <div class="card">
+      <button class="detail-toggle" id="detail-toggle">Show per-sentence detail</button>
+      <div class="detail-table" id="detail-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Voice</th>
+              <th>Cascade</th>
+              <th>Sentence</th>
+              <th>Words</th>
+              <th>Duration</th>
+              <th>WPM</th>
+            </tr>
+          </thead>
+          <tbody id="detail-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>kokoro-js 1.2.1 &middot; CPU inference via onnxruntime-node</span><br>
+      <span>WPM = (word count / audio duration) &times; 60</span>
+    </div>
+  </div>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+
+    // ── State ─────────────────────────────────────────────────────
+    const voiceRows = {};   // voice id -> { cue, compact, full, overall } TDs
+    const allResults = [];  // raw result entries
+
+    // ── Init empty table rows ─────────────────────────────────────
+    const VOICES = [
+      { id: 'af_heart', label: 'Heart (Female)' },
+      { id: 'af_bella', label: 'Bella (Female)' },
+      { id: 'af_nova', label: 'Nova (Female)' },
+      { id: 'am_adam', label: 'Adam (Male)' },
+      { id: 'am_michael', label: 'Michael (Male)' },
+    ];
+
+    const tbody = $('wpm-tbody');
+    for (const v of VOICES) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${v.label}</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+      `;
+      tbody.appendChild(tr);
+      const tds = tr.querySelectorAll('td');
+      voiceRows[v.id] = { cue: tds[1], compact: tds[2], full: tds[3], overall: tds[4] };
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────
+    function setStatus(text) { $('status').textContent = text; }
+    function setProgress(pct) { $('progress-fill').style.width = pct + '%'; }
+
+    function updateVoiceCells(voiceId) {
+      const rows = voiceRows[voiceId];
+      const voiceResults = allResults.filter(r => r.voice === voiceId);
+
+      for (const cascade of ['cue', 'compact', 'full']) {
+        const cResults = voiceResults.filter(r => r.cascade === cascade);
+        if (cResults.length) {
+          const avg = cResults.reduce((s, r) => s + r.wpm, 0) / cResults.length;
+          rows[cascade].textContent = avg.toFixed(1);
+          rows[cascade].className = 'val';
+        }
+      }
+
+      if (voiceResults.length) {
+        const avg = voiceResults.reduce((s, r) => s + r.wpm, 0) / voiceResults.length;
+        rows.overall.textContent = avg.toFixed(1);
+        rows.overall.className = 'val highlight';
+      }
+    }
+
+    function addDetailRow(r) {
+      const tr = document.createElement('tr');
+      const shortText = r.text.length > 60 ? r.text.slice(0, 57) + '...' : r.text;
+      tr.innerHTML = `
+        <td>${r.voiceLabel}</td>
+        <td>${r.cascade}</td>
+        <td title="${r.text}">${shortText}</td>
+        <td class="val">${r.wordCount}</td>
+        <td class="val">${r.audioDurationSec.toFixed(2)}s</td>
+        <td class="val">${r.wpm.toFixed(1)}</td>
+      `;
+      $('detail-tbody').appendChild(tr);
+    }
+
+    function renderSummary(summary) {
+      const grid = $('summary-grid');
+      grid.innerHTML = '';
+
+      // Overall
+      const overallEl = document.createElement('div');
+      overallEl.className = 'summary-stat';
+      overallEl.innerHTML = `<div class="number">${summary.overall}</div><div class="label">Overall WPM</div>`;
+      grid.appendChild(overallEl);
+
+      // By cascade
+      for (const [cascade, wpm] of Object.entries(summary.byCascade)) {
+        const el = document.createElement('div');
+        el.className = 'summary-stat';
+        el.innerHTML = `<div class="number">${wpm}</div><div class="label">${cascade}</div>`;
+        grid.appendChild(el);
+      }
+
+      // Fastest / slowest voice
+      const voiceEntries = Object.entries(summary.byVoice);
+      voiceEntries.sort((a, b) => b[1].overall - a[1].overall);
+      const fastest = voiceEntries[0];
+      const slowest = voiceEntries[voiceEntries.length - 1];
+
+      const fastEl = document.createElement('div');
+      fastEl.className = 'summary-stat';
+      fastEl.innerHTML = `<div class="number">${fastest[1].overall}</div><div class="label">Fastest: ${fastest[1].label}</div>`;
+      grid.appendChild(fastEl);
+
+      const slowEl = document.createElement('div');
+      slowEl.className = 'summary-stat';
+      slowEl.innerHTML = `<div class="number">${slowest[1].overall}</div><div class="label">Slowest: ${slowest[1].label}</div>`;
+      grid.appendChild(slowEl);
+
+      $('summary-card').classList.remove('hidden');
+    }
+
+    // ── Run benchmark via SSE ─────────────────────────────────────
+    async function runBenchmark() {
+      $('run-btn').disabled = true;
+      $('run-btn').textContent = 'Running...';
+      $('progress-row').classList.add('visible');
+      $('error-banner').classList.remove('visible');
+      $('summary-card').classList.add('hidden');
+      $('detail-tbody').innerHTML = '';
+      allResults.length = 0;
+
+      // Reset cells
+      for (const rows of Object.values(voiceRows)) {
+        for (const td of Object.values(rows)) {
+          td.textContent = '—';
+          td.className = 'val muted';
+        }
+      }
+
+      setStatus('Connecting to server...');
+      setProgress(0);
+
+      const eventSource = new EventSource('/api/wpm');
+
+      eventSource.addEventListener('progress', (e) => {
+        const data = JSON.parse(e.data);
+        setStatus(data.status);
+        if (data.total > 0) setProgress(Math.round((data.done / data.total) * 100));
+      });
+
+      eventSource.addEventListener('result', (e) => {
+        const r = JSON.parse(e.data);
+        allResults.push(r);
+        updateVoiceCells(r.voice);
+        addDetailRow(r);
+      });
+
+      eventSource.addEventListener('summary', (e) => {
+        const summary = JSON.parse(e.data);
+        renderSummary(summary);
+      });
+
+      eventSource.addEventListener('done', () => {
+        eventSource.close();
+        setStatus(`Done. ${allResults.length} samples.`);
+        setProgress(100);
+        $('run-btn').disabled = false;
+        $('run-btn').textContent = 'Run Again';
+      });
+
+      eventSource.addEventListener('error', (e) => {
+        if (e.data) {
+          const data = JSON.parse(e.data);
+          $('error-banner').textContent = 'Error: ' + data.message;
+        } else {
+          $('error-banner').textContent = 'Connection error. Is the server running? (pnpm serve)';
+        }
+        $('error-banner').classList.add('visible');
+        eventSource.close();
+        $('run-btn').disabled = false;
+        $('run-btn').textContent = 'Run Benchmark';
+        $('progress-row').classList.remove('visible');
+      });
+    }
+
+    // ── Event listeners ──────────────────────────────────────────
+    $('run-btn').addEventListener('click', runBenchmark);
+
+    $('detail-toggle').addEventListener('click', () => {
+      const detail = $('detail-table');
+      const visible = detail.classList.toggle('visible');
+      $('detail-toggle').textContent = visible ? 'Hide per-sentence detail' : 'Show per-sentence detail';
+    });
+  </script>
+</body>
+</html>

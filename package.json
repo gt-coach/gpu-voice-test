@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test:cpu": "node cpu-test.mjs",
-    "benchmark": "node benchmark.mjs"
+    "benchmark": "node benchmark.mjs",
+    "serve": "node server.mjs"
   },
   "engines": {
     "node": ">=18"
