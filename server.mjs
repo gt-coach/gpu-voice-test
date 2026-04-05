@@ -202,12 +202,13 @@ async function handleWpm(req, res) {
 }
 
 // ── Static file server ──────────────────────────────────────────────
-function serveStatic(req, res) {
-  let filePath = path.join(__dirname, req.url === '/' ? 'index.html' : req.url);
+function serveStatic(pathname, res) {
+  const safePath = pathname === '/' ? '/index.html' : decodeURIComponent(pathname);
+  const filePath = path.join(__dirname, safePath);
 
   // Security: prevent directory traversal
-  if (!filePath.startsWith(__dirname)) {
-    res.writeHead(403);
+  if (!filePath.startsWith(__dirname + path.sep) && filePath !== path.join(__dirname, 'index.html')) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('Forbidden');
     return;
   }
@@ -217,8 +218,8 @@ function serveStatic(req, res) {
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
-      res.writeHead(404);
-      res.end('Not found');
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not found: ' + safePath);
       return;
     }
     res.writeHead(200, { 'Content-Type': contentType });
@@ -233,7 +234,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/generate') return handleGenerate(req, res);
   if (url.pathname === '/api/wpm') return handleWpm(req, res);
 
-  serveStatic(req, res);
+  serveStatic(url.pathname, res);
 });
 
 server.listen(PORT, () => {
