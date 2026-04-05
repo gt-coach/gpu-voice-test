@@ -248,7 +248,7 @@
 
     <!-- WPM results table -->
     <div class="card">
-      <h2>Words Per Minute by Voice</h2>
+      <h2>Kokoro TTS — Words Per Minute</h2>
       <table id="wpm-table">
         <thead>
           <tr>
@@ -282,6 +282,39 @@
           <tbody id="detail-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Web Speech section -->
+    <div class="card" style="margin-top: 24px;">
+      <h2>Web Speech API — Comparison</h2>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+        <select id="ws-voice-select" style="background: #0f1117; color: #e1e4ea; border: 1px solid #3a3d4a; border-radius: 6px; padding: 6px 10px; font-size: 13px; flex: 1; min-width: 200px;">
+          <option value="">Loading voices...</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="ws-run-btn" disabled>Run Web Speech</button>
+      </div>
+      <div class="progress-row" id="ws-progress-row">
+        <div class="progress-track"><div class="progress-fill" id="ws-progress-fill"></div></div>
+        <span class="progress-label" id="ws-status">—</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Voice</th>
+            <th>Cue</th>
+            <th>Compact</th>
+            <th>Full</th>
+            <th>Overall</th>
+          </tr>
+        </thead>
+        <tbody id="ws-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Speed match summary -->
+    <div class="card hidden" id="speed-match-card" style="margin-top: 12px;">
+      <h2>Speed Calibration — Kokoro vs Web Speech</h2>
+      <div id="speed-match-content" style="font-size: 13px; line-height: 1.8;"></div>
     </div>
 
     <div class="footer">
@@ -523,8 +556,182 @@
       });
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // ── Web Speech API benchmark ─────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    const BENCH_SENTENCES = [
+      { text: 'Corner 14: brake earlier. Late brake point.', cascade: 'cue' },
+      { text: 'Corner 14: same rhythm.', cascade: 'cue' },
+      { text: 'Corner 14: release brake sooner. Late brake release.', cascade: 'cue' },
+      { text: 'Corner 14: wait before throttle. Early throttle pickup.', cascade: 'cue' },
+      { text: 'Corner 14: square the exit then throttle. Low exit speed.', cascade: 'cue' },
+      { text: 'Corner 14, brake earlier — it carries into Corner 15.', cascade: 'compact' },
+      { text: 'Corner 14, release brake sooner — you released the brake too late, losing exit speed.', cascade: 'compact' },
+      { text: "Corner 14, commit to braking later. You're losing exit speed.", cascade: 'compact' },
+      { text: 'Corner 14 coming up. Keep it going.', cascade: 'compact' },
+      { text: 'Corner 14 next. Same rhythm.', cascade: 'compact' },
+      { text: 'Corner 14, brake one beat earlier — the brake release shifted late at Corner 12, and by Corner 15 your apex speed is too high.', cascade: 'full' },
+      { text: 'Corner 14, pick up the throttle earlier — you picked up throttle too late. That cost you half a second.', cascade: 'full' },
+      { text: 'Corner 14, square the exit, then throttle — your exit speed was low. That cost you half a second.', cascade: 'full' },
+      { text: 'Corners 14, 11, 12, and 13 coming up, brake one beat earlier at each — you lost half a second here last lap.', cascade: 'full' },
+      { text: 'Approaching Corner 14. Keep it clean.', cascade: 'full' },
+    ].map(s => ({ ...s, wordCount: s.text.split(/\s+/).length }));
+
+    let wsResults = [];
+    let wsVoices = [];
+
+    function loadWebSpeechVoices() {
+      const synth = window.speechSynthesis;
+      const populate = () => {
+        const voices = synth.getVoices();
+        // Filter to English local voices (non-network), then all English, then all
+        const english = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
+        const localEn = english.filter(v => v.localService);
+        wsVoices = localEn.length ? localEn : english.length ? english : voices;
+
+        const select = $('ws-voice-select');
+        select.innerHTML = '';
+        for (const v of wsVoices) {
+          const opt = document.createElement('option');
+          opt.value = v.voiceURI;
+          opt.textContent = `${v.name} (${v.lang}${v.localService ? '' : ', network'})`;
+          select.appendChild(opt);
+        }
+        if (wsVoices.length) {
+          $('ws-run-btn').disabled = false;
+        } else {
+          select.innerHTML = '<option value="">No voices available</option>';
+        }
+      };
+
+      populate();
+      if (!wsVoices.length) {
+        synth.addEventListener('voiceschanged', populate, { once: true });
+      }
+    }
+
+    function speakAndMeasure(text, voice) {
+      return new Promise((resolve, reject) => {
+        const synth = window.speechSynthesis;
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.voice = voice;
+        utt.lang = voice.lang;
+        utt.rate = 1.0;
+        utt.pitch = 1.0;
+        utt.volume = 0.0; // silent — we just measure timing
+
+        let startTime;
+        utt.onstart = () => { startTime = performance.now(); };
+        utt.onend = () => { resolve((performance.now() - startTime) / 1000); };
+        utt.onerror = (e) => { reject(new Error(e.error)); };
+
+        synth.speak(utt);
+      });
+    }
+
+    async function runWebSpeechBenchmark() {
+      const select = $('ws-voice-select');
+      const voiceURI = select.value;
+      const voice = wsVoices.find(v => v.voiceURI === voiceURI);
+      if (!voice) return;
+
+      $('ws-run-btn').disabled = true;
+      $('ws-run-btn').textContent = 'Running...';
+      $('ws-progress-row').classList.add('visible');
+      $('ws-status').textContent = 'Starting...';
+      $('ws-progress-fill').style.width = '0%';
+      wsResults = [];
+
+      const wsTbody = $('ws-tbody');
+      wsTbody.innerHTML = '';
+
+      // Create the result row for this voice
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${voice.name}</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+        <td class="val muted">—</td>
+      `;
+      wsTbody.appendChild(tr);
+      const tds = tr.querySelectorAll('td');
+      const wsCells = { cue: tds[1], compact: tds[2], full: tds[3], overall: tds[4] };
+
+      const total = BENCH_SENTENCES.length;
+
+      for (let i = 0; i < BENCH_SENTENCES.length; i++) {
+        const s = BENCH_SENTENCES[i];
+        $('ws-status').textContent = `${s.cascade}: "${s.text.slice(0, 40)}..."`;
+        $('ws-progress-fill').style.width = Math.round((i / total) * 100) + '%';
+
+        try {
+          const durationSec = await speakAndMeasure(s.text, voice);
+          const wpm = (s.wordCount / durationSec) * 60;
+          wsResults.push({ cascade: s.cascade, wordCount: s.wordCount, durationSec, wpm });
+
+          // Update running averages
+          for (const c of CASCADES) {
+            const cRes = wsResults.filter(r => r.cascade === c);
+            if (cRes.length) {
+              const avg = cRes.reduce((s, r) => s + r.wpm, 0) / cRes.length;
+              wsCells[c].textContent = avg.toFixed(1);
+              wsCells[c].className = 'val';
+            }
+          }
+          if (wsResults.length) {
+            const avg = wsResults.reduce((s, r) => s + r.wpm, 0) / wsResults.length;
+            wsCells.overall.textContent = avg.toFixed(1);
+            wsCells.overall.className = 'val highlight';
+          }
+        } catch (e) {
+          console.error('Web Speech error:', e);
+        }
+      }
+
+      $('ws-progress-fill').style.width = '100%';
+      $('ws-status').textContent = `Done. ${wsResults.length} samples.`;
+      $('ws-run-btn').disabled = false;
+      $('ws-run-btn').textContent = 'Run Web Speech';
+
+      // Show speed calibration comparison
+      updateSpeedComparison();
+    }
+
+    function updateSpeedComparison() {
+      if (!allResults.length || !wsResults.length) return;
+
+      const kokoroOverall = allResults.reduce((s, r) => s + r.wpm, 0) / allResults.length;
+      const wsOverall = wsResults.reduce((s, r) => s + r.wpm, 0) / wsResults.length;
+      const kokoroSpeed = parseFloat($('speed-slider').value);
+      const ratio = wsOverall / kokoroOverall;
+      const matchSpeed = (kokoroSpeed * ratio).toFixed(2);
+
+      let html = '';
+      html += `<div class="row"><span class="label">Kokoro WPM (at ${kokoroSpeed.toFixed(1)}x)</span><span class="val">${kokoroOverall.toFixed(1)}</span></div>`;
+      html += `<div class="row"><span class="label">Web Speech WPM (at 1.0x)</span><span class="val">${wsOverall.toFixed(1)}</span></div>`;
+      html += `<div class="row"><span class="label">WPM ratio (Web Speech / Kokoro)</span><span class="val">${ratio.toFixed(3)}</span></div>`;
+      html += `<div class="row" style="margin-top:8px;padding-top:8px;border-top:1px solid #2a2d3a"><span class="label">Kokoro speed to match Web Speech</span><span class="val highlight" style="font-size:16px">${matchSpeed}x</span></div>`;
+
+      // Per-cascade breakdown
+      for (const c of CASCADES) {
+        const kRes = allResults.filter(r => r.cascade === c);
+        const wRes = wsResults.filter(r => r.cascade === c);
+        if (kRes.length && wRes.length) {
+          const kAvg = kRes.reduce((s, r) => s + r.wpm, 0) / kRes.length;
+          const wAvg = wRes.reduce((s, r) => s + r.wpm, 0) / wRes.length;
+          const cMatch = (kokoroSpeed * wAvg / kAvg).toFixed(2);
+          html += `<div class="row"><span class="label" style="padding-left:12px">${c}: Kokoro speed to match</span><span class="val">${cMatch}x</span></div>`;
+        }
+      }
+
+      $('speed-match-content').innerHTML = html;
+      $('speed-match-card').classList.remove('hidden');
+    }
+
     // ── Event listeners ──────────────────────────────────────────
     $('run-btn').addEventListener('click', runBenchmark);
+    $('ws-run-btn').addEventListener('click', runWebSpeechBenchmark);
 
     $('speed-slider').addEventListener('input', () => {
       $('speed-value').textContent = parseFloat($('speed-slider').value).toFixed(1) + 'x';
@@ -535,6 +742,9 @@
       const visible = detail.classList.toggle('visible');
       $('detail-toggle').textContent = visible ? 'Hide per-sentence detail' : 'Show per-sentence detail';
     });
+
+    // Init Web Speech voices
+    loadWebSpeechVoices();
   </script>
 </body>
 </html>
