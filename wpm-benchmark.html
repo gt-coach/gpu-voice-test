@@ -119,6 +119,23 @@
       color: #fff;
     }
 
+    /* Play button in cells */
+    .play-btn {
+      background: none;
+      border: 1px solid #3a3d4a;
+      border-radius: 4px;
+      color: #8b8fa3;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 6px;
+      margin-left: 6px;
+      transition: all 0.15s;
+      vertical-align: middle;
+    }
+    .play-btn:hover { color: #6366f1; border-color: #6366f1; }
+    .play-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .play-btn.loading { color: #60a5fa; border-color: #60a5fa; }
+
     /* Detail toggle */
     .detail-toggle {
       background: none;
@@ -276,11 +293,8 @@
   <script type="module">
     const $ = (id) => document.getElementById(id);
 
-    // ── State ─────────────────────────────────────────────────────
-    const voiceRows = {};   // voice id -> { cue, compact, full, overall } TDs
-    const allResults = [];  // raw result entries
-
-    // ── Init empty table rows ─────────────────────────────────────
+    // ── Constants ──────────────────────────────────────────────────
+    const SAMPLE_RATE = 24000;
     const VOICES = [
       { id: 'af_heart', label: 'Heart (Female)' },
       { id: 'af_bella', label: 'Bella (Female)' },
@@ -288,20 +302,72 @@
       { id: 'am_adam', label: 'Adam (Male)' },
       { id: 'am_michael', label: 'Michael (Male)' },
     ];
+    const CASCADES = ['cue', 'compact', 'full'];
 
+    // ── State ─────────────────────────────────────────────────────
+    const voiceRows = {};       // voice id -> { cue, compact, full, overall } TDs
+    const voicePlayBtns = {};   // voice id -> { cue, compact, full } buttons
+    const sampleTexts = {};     // cascade -> first sentence text (set during benchmark)
+    const allResults = [];
+
+    // ── Audio playback ───────────────────────────────────────────
+    function playAudio(float32) {
+      const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      const buf = ctx.createBuffer(1, float32.length, SAMPLE_RATE);
+      buf.copyToChannel(float32, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start();
+    }
+
+    async function fetchAndPlay(voiceId, cascade, btn) {
+      const text = sampleTexts[cascade];
+      if (!text) return;
+      const speed = parseFloat($('speed-slider').value);
+      btn.disabled = true;
+      btn.classList.add('loading');
+      btn.textContent = '...';
+      try {
+        const res = await fetch(`/api/generate?text=${encodeURIComponent(text)}&voice=${voiceId}&speed=${speed}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        const raw = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+        playAudio(new Float32Array(raw.buffer));
+      } catch (e) {
+        console.error('Play failed:', e);
+      }
+      btn.disabled = false;
+      btn.classList.remove('loading');
+      btn.textContent = '\u25B6';
+    }
+
+    // ── Init empty table rows ─────────────────────────────────────
     const tbody = $('wpm-tbody');
     for (const v of VOICES) {
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${v.label}</td>
-        <td class="val muted">—</td>
-        <td class="val muted">—</td>
-        <td class="val muted">—</td>
-        <td class="val muted">—</td>
-      `;
+      tr.innerHTML = `<td>${v.label}</td>`;
+      voiceRows[v.id] = {};
+      voicePlayBtns[v.id] = {};
+      for (const c of CASCADES) {
+        const td = document.createElement('td');
+        td.className = 'val muted';
+        td.textContent = '—';
+        const btn = document.createElement('button');
+        btn.className = 'play-btn hidden';
+        btn.textContent = '\u25B6';
+        btn.addEventListener('click', () => fetchAndPlay(v.id, c, btn));
+        td.appendChild(btn);
+        tr.appendChild(td);
+        voiceRows[v.id][c] = td;
+        voicePlayBtns[v.id][c] = btn;
+      }
+      const overallTd = document.createElement('td');
+      overallTd.className = 'val muted';
+      overallTd.textContent = '—';
+      tr.appendChild(overallTd);
+      voiceRows[v.id].overall = overallTd;
       tbody.appendChild(tr);
-      const tds = tr.querySelectorAll('td');
-      voiceRows[v.id] = { cue: tds[1], compact: tds[2], full: tds[3], overall: tds[4] };
     }
 
     // ── Helpers ───────────────────────────────────────────────────
@@ -310,14 +376,21 @@
 
     function updateVoiceCells(voiceId) {
       const rows = voiceRows[voiceId];
+      const btns = voicePlayBtns[voiceId];
       const voiceResults = allResults.filter(r => r.voice === voiceId);
 
-      for (const cascade of ['cue', 'compact', 'full']) {
+      for (const cascade of CASCADES) {
         const cResults = voiceResults.filter(r => r.cascade === cascade);
         if (cResults.length) {
           const avg = cResults.reduce((s, r) => s + r.wpm, 0) / cResults.length;
+          // Keep play button reference before overwriting
+          const btn = btns[cascade];
           rows[cascade].textContent = avg.toFixed(1);
           rows[cascade].className = 'val';
+          rows[cascade].appendChild(btn);
+          btn.classList.remove('hidden');
+          // Store first sentence as sample
+          if (!sampleTexts[cascade]) sampleTexts[cascade] = cResults[0].text;
         }
       }
 
@@ -388,13 +461,19 @@
       $('summary-card').classList.add('hidden');
       $('detail-tbody').innerHTML = '';
       allResults.length = 0;
+      for (const k of Object.keys(sampleTexts)) delete sampleTexts[k];
 
-      // Reset cells
-      for (const rows of Object.values(voiceRows)) {
-        for (const td of Object.values(rows)) {
-          td.textContent = '—';
-          td.className = 'val muted';
+      // Reset cells and re-attach hidden play buttons
+      for (const [voiceId, rows] of Object.entries(voiceRows)) {
+        for (const c of CASCADES) {
+          rows[c].textContent = '—';
+          rows[c].className = 'val muted';
+          const btn = voicePlayBtns[voiceId][c];
+          btn.classList.add('hidden');
+          rows[c].appendChild(btn);
         }
+        rows.overall.textContent = '—';
+        rows.overall.className = 'val muted';
       }
 
       setStatus('Connecting to server...');
