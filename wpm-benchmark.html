@@ -218,9 +218,9 @@
       </div>
     </div>
 
-    <!-- Speed slider -->
+    <!-- Speed slider — Kokoro -->
     <div class="card" style="margin-bottom: 12px;">
-      <h2>Voice Speed</h2>
+      <h2>Kokoro Speed</h2>
       <div style="display: flex; align-items: center; gap: 16px;">
         <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
           style="flex: 1; accent-color: #6366f1;">
@@ -292,6 +292,17 @@
           <option value="">Loading voices...</option>
         </select>
         <button class="btn btn-primary btn-sm" id="ws-run-btn" disabled>Run Web Speech</button>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
+        <span style="font-size: 12px; color: #8b8fa3; white-space: nowrap;">Rate</span>
+        <input type="range" id="ws-speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
+          style="flex: 1; accent-color: #6366f1;">
+        <span id="ws-speed-value" style="font-size: 20px; font-weight: 700; color: #fff; min-width: 50px; text-align: right;">1.0x</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-bottom: 12px;">
+        <span>0.5x (slow)</span>
+        <span>1.0x (default)</span>
+        <span>2.0x (fast)</span>
       </div>
       <div class="progress-row" id="ws-progress-row">
         <div class="progress-track"><div class="progress-fill" id="ws-progress-fill"></div></div>
@@ -610,13 +621,13 @@
       }
     }
 
-    function speakAndMeasure(text, voice) {
+    function speakAndMeasure(text, voice, rate) {
       return new Promise((resolve, reject) => {
         const synth = window.speechSynthesis;
         const utt = new SpeechSynthesisUtterance(text);
         utt.voice = voice;
         utt.lang = voice.lang;
-        utt.rate = 1.0;
+        utt.rate = rate;
         utt.pitch = 1.0;
         utt.volume = 0.0; // silent — we just measure timing
 
@@ -635,10 +646,12 @@
       const voice = wsVoices.find(v => v.voiceURI === voiceURI);
       if (!voice) return;
 
+      const wsRate = parseFloat($('ws-speed-slider').value);
+
       $('ws-run-btn').disabled = true;
       $('ws-run-btn').textContent = 'Running...';
       $('ws-progress-row').classList.add('visible');
-      $('ws-status').textContent = 'Starting...';
+      $('ws-status').textContent = `Starting (rate ${wsRate.toFixed(1)}x)...`;
       $('ws-progress-fill').style.width = '0%';
       wsResults = [];
 
@@ -666,7 +679,7 @@
         $('ws-progress-fill').style.width = Math.round((i / total) * 100) + '%';
 
         try {
-          const durationSec = await speakAndMeasure(s.text, voice);
+          const durationSec = await speakAndMeasure(s.text, voice, wsRate);
           const wpm = (s.wordCount / durationSec) * 60;
           wsResults.push({ cascade: s.cascade, wordCount: s.wordCount, durationSec, wpm });
 
@@ -704,12 +717,13 @@
       const kokoroOverall = allResults.reduce((s, r) => s + r.wpm, 0) / allResults.length;
       const wsOverall = wsResults.reduce((s, r) => s + r.wpm, 0) / wsResults.length;
       const kokoroSpeed = parseFloat($('speed-slider').value);
+      const wsRate = parseFloat($('ws-speed-slider').value);
       const ratio = wsOverall / kokoroOverall;
       const matchSpeed = (kokoroSpeed * ratio).toFixed(2);
 
       let html = '';
-      html += `<div class="row"><span class="label">Kokoro WPM (at ${kokoroSpeed.toFixed(1)}x)</span><span class="val">${kokoroOverall.toFixed(1)}</span></div>`;
-      html += `<div class="row"><span class="label">Web Speech WPM (at 1.0x)</span><span class="val">${wsOverall.toFixed(1)}</span></div>`;
+      html += `<div class="row"><span class="label">Kokoro WPM (at ${kokoroSpeed.toFixed(1)}x speed)</span><span class="val">${kokoroOverall.toFixed(1)}</span></div>`;
+      html += `<div class="row"><span class="label">Web Speech WPM (at ${wsRate.toFixed(1)}x rate)</span><span class="val">${wsOverall.toFixed(1)}</span></div>`;
       html += `<div class="row"><span class="label">WPM ratio (Web Speech / Kokoro)</span><span class="val">${ratio.toFixed(3)}</span></div>`;
       html += `<div class="row" style="margin-top:8px;padding-top:8px;border-top:1px solid #2a2d3a"><span class="label">Kokoro speed to match Web Speech</span><span class="val highlight" style="font-size:16px">${matchSpeed}x</span></div>`;
 
@@ -735,6 +749,10 @@
 
     $('speed-slider').addEventListener('input', () => {
       $('speed-value').textContent = parseFloat($('speed-slider').value).toFixed(1) + 'x';
+    });
+
+    $('ws-speed-slider').addEventListener('input', () => {
+      $('ws-speed-value').textContent = parseFloat($('ws-speed-slider').value).toFixed(1) + 'x';
     });
 
     $('detail-toggle').addEventListener('click', () => {
