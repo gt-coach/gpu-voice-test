@@ -5,15 +5,18 @@ import { pathToFileURL } from 'node:url';
 import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 
-const threadCount = String(workerData.threads ?? 1);
 const require = createRequire(import.meta.url);
 
-process.env.OMP_NUM_THREADS ??= threadCount;
-process.env.OPENBLAS_NUM_THREADS ??= threadCount;
-process.env.MKL_NUM_THREADS ??= threadCount;
-process.env.VECLIB_MAXIMUM_THREADS ??= threadCount;
-process.env.NUMEXPR_NUM_THREADS ??= threadCount;
-process.env.ORT_NUM_THREADS ??= threadCount;
+if (workerData.threads !== 'auto') {
+  const threadCount = String(workerData.threads ?? 1);
+
+  process.env.OMP_NUM_THREADS ??= threadCount;
+  process.env.OPENBLAS_NUM_THREADS ??= threadCount;
+  process.env.MKL_NUM_THREADS ??= threadCount;
+  process.env.VECLIB_MAXIMUM_THREADS ??= threadCount;
+  process.env.NUMEXPR_NUM_THREADS ??= threadCount;
+  process.env.ORT_NUM_THREADS ??= threadCount;
+}
 
 async function configureTransformers() {
   if (!workerData.cacheDir) return;

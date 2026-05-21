@@ -25,6 +25,14 @@ function intArg(name, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function threadsArg(name, fallback = 'auto') {
+  const value = arg(name, fallback).toLowerCase();
+  if (value === 'auto' || value === 'default') return 'auto';
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function floatArg(name, fallback) {
   const parsed = Number.parseFloat(arg(name, String(fallback)));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -104,7 +112,7 @@ const opts = {
   dtype: arg('dtype', 'q8'),
   device: arg('device', 'cpu'),
   workers: intArg('workers', 1),
-  threads: intArg('threads', 1),
+  threads: threadsArg('threads', 'auto'),
   voices: listArg('voices', defaultVoices),
   users: listArg('users', '1,2,3,4,6,8').map(Number).filter(Number.isFinite),
   burstSizes: listArg('bursts', '1,2,4,8').map(Number).filter(Number.isFinite),
@@ -133,8 +141,8 @@ if (opts.workers < 1) {
   throw new Error('--workers must be at least 1');
 }
 
-if (opts.threads < 1) {
-  throw new Error('--threads must be at least 1');
+if (opts.threads !== 'auto' && opts.threads < 1) {
+  throw new Error('--threads must be auto or at least 1');
 }
 
 if (opts.voices.length === 0) {

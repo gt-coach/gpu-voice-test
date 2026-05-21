@@ -24,6 +24,8 @@ The benchmark runs:
 
 The verdict is `Max sustainable simulated remote users`.
 
+`--threads=auto` is the default. In auto mode the benchmark does not set native thread environment variables, so Kokoro/ONNX can use its normal CPU threading behavior. Use `--threads=1` only when you intentionally want a strict thread-constrained comparison.
+
 ## Local Node Run
 
 From the repo root:
@@ -107,7 +109,7 @@ docker run --rm \
   -v "$PWD/kokoro-cache:/app/.cache" \
   kokoro-cpu-bench \
   --workers=1 \
-  --threads=1 \
+  --threads=auto \
   --dtype=q8 \
   --users=1,2,3,4 \
   --bursts=1,2,4 \
@@ -115,7 +117,7 @@ docker run --rm \
   --drainSec=60
 ```
 
-Simulate `n4a-standard-2` with two single-threaded workers:
+Simulate `n4a-standard-2` with two parallel Kokoro workers and default ONNX threading:
 
 ```bash
 mkdir -p kokoro-results kokoro-samples kokoro-cache
@@ -129,7 +131,7 @@ docker run --rm \
   -v "$PWD/kokoro-cache:/app/.cache" \
   kokoro-cpu-bench \
   --workers=2 \
-  --threads=1 \
+  --threads=auto \
   --dtype=q8 \
   --users=1,2,3,4,6,8 \
   --bursts=1,2,4,8 \
@@ -137,7 +139,7 @@ docker run --rm \
   --drainSec=60
 ```
 
-Simulate `n4a-standard-2` with one worker and a two-thread hint:
+Simulate `n4a-standard-2` with one Kokoro worker and default ONNX threading:
 
 ```bash
 mkdir -p kokoro-results kokoro-samples kokoro-cache
@@ -151,7 +153,7 @@ docker run --rm \
   -v "$PWD/kokoro-cache:/app/.cache" \
   kokoro-cpu-bench \
   --workers=1 \
-  --threads=2 \
+  --threads=auto \
   --dtype=q8 \
   --users=1,2,3,4,6,8 \
   --bursts=1,2,4,8 \
@@ -159,7 +161,7 @@ docker run --rm \
   --drainSec=60
 ```
 
-`--threads` sets common native thread environment hints before Kokoro loads. Docker `--cpus` and the worker count are the constraints to trust most.
+Optional strict comparison: add `--threads=1` to set common native thread environment hints before Kokoro loads. Docker `--cpus` and the worker count are the constraints to trust most; `--threads=auto` is the realistic default.
 
 ## GCP Run Shape
 
@@ -185,7 +187,7 @@ docker run --rm \
   -v "$PWD/kokoro-cache:/app/.cache" \
   kokoro-cpu-bench \
   --workers=2 \
-  --threads=1 \
+  --threads=auto \
   --dtype=q8 \
   --users=1,2,3,4,6,8 \
   --bursts=1,2,4,8 \
@@ -228,7 +230,7 @@ Do not pursue tiny self-hosted Kokoro just because the benchmark runs. For the c
 ```text
 n4a-standard-2
 workers=2
-threads=1
+threads=auto
 dtype=q8
 
 max sustainable users >= 4
