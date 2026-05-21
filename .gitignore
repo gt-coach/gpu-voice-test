@@ -1,2 +1,8 @@
 node_modules/
 output.wav
+.cache/
+results/
+samples/
+kokoro-cache/
+kokoro-results/
+kokoro-samples/

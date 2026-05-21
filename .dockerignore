@@ -1,0 +1,12 @@
+.cache
+.git
+.github
+node_modules
+results
+samples
+kokoro-cache
+kokoro-results
+kokoro-samples
+*.wav
+*.log
+.DS_Store
