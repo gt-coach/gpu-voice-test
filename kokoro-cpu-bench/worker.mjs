@@ -2,10 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { parentPort, workerData } from 'node:worker_threads';
 import { performance } from 'node:perf_hooks';
 
 const require = createRequire(import.meta.url);
+const workerData = JSON.parse(process.env.KOKORO_WORKER_DATA ?? '{}');
+
+function send(message) {
+  if (process.send) {
+    process.send(message);
+  }
+}
 
 if (workerData.threads !== 'auto') {
   const threadCount = String(workerData.threads ?? 1);
@@ -35,7 +41,7 @@ async function configureTransformers() {
     const { env } = await import(pathToFileURL(transformersEntry).href);
     env.cacheDir = workerData.cacheDir;
   } catch (error) {
-    parentPort.postMessage({
+    send({
       type: 'warning',
       message: `Unable to configure Transformers.js cache: ${errorText(error)}`,
     });
@@ -140,7 +146,7 @@ async function main() {
           lastProgressFile = file;
           lastProgressPct = rounded;
 
-          parentPort.postMessage({
+          send({
             type: 'load_progress',
             file,
             progress: rounded,
@@ -151,13 +157,13 @@ async function main() {
 
     const loadMs = performance.now() - loadStartedAt;
 
-    parentPort.postMessage({
+    send({
       type: 'ready',
       workerId: workerData.workerId,
       loadMs,
     });
 
-    parentPort.on('message', async (job) => {
+    process.on('message', async (job) => {
       if (job.type !== 'generate') return;
 
       const startedAt = performance.now();
@@ -175,7 +181,7 @@ async function main() {
           writeWav(job.savePath, data, stats.sampleRate);
         }
 
-        parentPort.postMessage({
+        send({
           type: 'result',
           ok: true,
           job,
@@ -183,7 +189,7 @@ async function main() {
           ...stats,
         });
       } catch (error) {
-        parentPort.postMessage({
+        send({
           type: 'result',
           ok: false,
           job,
@@ -196,7 +202,7 @@ async function main() {
       }
     });
   } catch (error) {
-    parentPort.postMessage({
+    send({
       type: 'ready_error',
       workerId: workerData.workerId,
       error: errorText(error),

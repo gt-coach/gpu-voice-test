@@ -24,6 +24,8 @@ The benchmark runs:
 
 The verdict is `Max sustainable simulated remote users`.
 
+`--workers` starts separate Node child processes, not `worker_threads`. This avoids sharing the native `onnxruntime-node` addon across JS worker threads and makes `--workers=2` a real two-process parallel request test.
+
 `--threads=auto` is the default. In auto mode the benchmark does not set native thread environment variables, so Kokoro/ONNX can use its normal CPU threading behavior. Use `--threads=1` only when you intentionally want a strict thread-constrained comparison.
 
 ## Local Node Run
@@ -219,7 +221,7 @@ Important metrics:
 - `meanRtf`: generation seconds divided by audio seconds. Lower is better; `<1.0` is faster than realtime.
 - `meanSpeedX`: audio seconds divided by generation seconds. Higher is better.
 - `realtimeX`: aggregate generated audio seconds per wall-clock second.
-- `rssMb`: Node process memory use.
+- `rssMb`: approximate total RSS for the parent benchmark process plus Kokoro worker processes.
 
 Listen to the WAVs in `samples/` or `kokoro-samples/` before making the product decision.
 

@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Worker } from 'node:worker_threads';
+import { execFileSync, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { SENTENCES, VOICES } from '../sentences.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+const workerPath = path.join(__dirname, 'worker.mjs');
+const workerPids = new Set();
 
 function arg(name, fallback) {
   const prefix = `--${name}=`;
@@ -66,6 +68,33 @@ function round(value, digits = 2) {
   if (!Number.isFinite(value)) return value;
   const multiplier = 10 ** digits;
   return Math.round(value * multiplier) / multiplier;
+}
+
+function rssMbForPid(pid) {
+  if (!pid) return 0;
+
+  try {
+    if (os.platform() === 'linux') {
+      const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+      const match = status.match(/^VmRSS:\s+(\d+)\s+kB$/m);
+      return match ? Number.parseInt(match[1], 10) / 1024 : 0;
+    }
+
+    const output = execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const rssKb = Number.parseInt(output.trim(), 10);
+    return Number.isFinite(rssKb) ? rssKb / 1024 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function aggregateRssMb() {
+  const parentRssMb = process.memoryUsage().rss / 1024 / 1024;
+  const workersRssMb = [...workerPids].reduce((sum, pid) => sum + rssMbForPid(pid), 0);
+  return parentRssMb + workersRssMb;
 }
 
 function makeRng(seed = 42) {
@@ -203,16 +232,21 @@ class Pool {
       };
 
       item.readyPromise = new Promise((resolve, reject) => {
-        item.worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-          workerData: {
-            workerId: i,
-            modelId: opts.modelId,
-            dtype: opts.dtype,
-            device: opts.device,
-            threads: opts.threads,
-            cacheDir: opts.cacheDir,
+        item.worker = fork(workerPath, [], {
+          stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+          env: {
+            ...process.env,
+            KOKORO_WORKER_DATA: JSON.stringify({
+              workerId: i,
+              modelId: opts.modelId,
+              dtype: opts.dtype,
+              device: opts.device,
+              threads: opts.threads,
+              cacheDir: opts.cacheDir,
+            }),
           },
         });
+        workerPids.add(item.worker.pid);
 
         item.worker.on('message', (message) => {
           if (message.type === 'warning') {
@@ -248,6 +282,7 @@ class Pool {
         });
 
         item.worker.on('exit', (code) => {
+          workerPids.delete(item.worker.pid);
           if (code !== 0 && !this.failed) {
             this.failItem(item, new Error(`Worker ${item.id} exited with code ${code}`));
           }
@@ -332,7 +367,7 @@ class Pool {
       item.busy = true;
       item.activeJob = job;
       job.startedAt = performance.now();
-      item.worker.postMessage(job);
+      item.worker.send(job);
     }
   }
 
@@ -418,7 +453,20 @@ class Pool {
   }
 
   async terminate() {
-    await Promise.allSettled(this.items.map((item) => item.worker?.terminate()));
+    await Promise.allSettled(
+      this.items.map(
+        (item) =>
+          new Promise((resolve) => {
+            if (!item.worker || item.worker.killed) {
+              resolve();
+              return;
+            }
+
+            item.worker.once('exit', resolve);
+            item.worker.kill('SIGTERM');
+          }),
+      ),
+    );
   }
 }
 
@@ -446,7 +494,7 @@ function summarize(results, wallSec) {
     realtimeX: wallSec > 0 ? totalAudioSec / wallSec : 0,
     charsPerSec: wallSec > 0 ? totalChars / wallSec : 0,
     messagesPerMin: wallSec > 0 ? (ok.length / wallSec) * 60 : 0,
-    rssMb: process.memoryUsage().rss / 1024 / 1024,
+    rssMb: aggregateRssMb(),
     load1: os.loadavg()[0],
   };
 }
