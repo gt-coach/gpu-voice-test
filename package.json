@@ -6,6 +6,7 @@
     "test:cpu": "node cpu-test.mjs",
     "benchmark": "node benchmark.mjs",
     "bench:kokoro-cpu": "node kokoro-cpu-bench/bench.mjs",
+    "bench:kokoro-gpu": "node kokoro-cpu-bench/bench.mjs --device=cuda",
     "serve": "node server.mjs"
   },
   "engines": {

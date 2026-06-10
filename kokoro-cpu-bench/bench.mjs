@@ -70,6 +70,10 @@ function round(value, digits = 2) {
   return Math.round(value * multiplier) / multiplier;
 }
 
+function errorText(error) {
+  return error?.stack || error?.message || String(error);
+}
+
 function rssMbForPid(pid) {
   if (!pid) return 0;
 
@@ -121,10 +125,10 @@ function parseTierWeights(raw) {
 }
 
 const CURRENT_USAGE = {
-  wau: 75,
-  lapsPerUserWeek: 33,
-  messagesPerLap: 5,
-  lapSec: 90,
+  wau: intArg('wau', 75),
+  lapsPerUserWeek: intArg('lapsPerUserWeek', 33),
+  messagesPerLap: intArg('messagesPerLap', 5),
+  lapSec: intArg('lapSec', 90),
 };
 
 const DEADLINES_MS = {
@@ -135,11 +139,13 @@ const DEADLINES_MS = {
 
 const tierWeights = parseTierWeights(arg('tierWeights', 'cue:3,compact:6,full:1'));
 const defaultVoices = VOICES.map((voice) => voice.id).join(',');
+const defaultDevice = arg('device', 'cpu');
+const defaultDtype = defaultDevice === 'cuda' ? 'fp32' : 'q8';
 
 const opts = {
   modelId: arg('modelId', 'onnx-community/Kokoro-82M-v1.0-ONNX'),
-  dtype: arg('dtype', 'q8'),
-  device: arg('device', 'cpu'),
+  dtype: arg('dtype', defaultDtype),
+  device: defaultDevice,
   workers: intArg('workers', 1),
   threads: threadsArg('threads', 'auto'),
   voices: listArg('voices', defaultVoices),
@@ -165,6 +171,8 @@ const messages = SENTENCES.map((sentence) => ({
   weight: opts.tierWeights[sentence.cascade] ?? 1,
   deadlineMs: DEADLINES_MS[sentence.cascade] ?? 3000,
 }));
+
+const resultPrefix = "kokoro-" + opts.device.replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
 
 if (opts.workers < 1) {
   throw new Error('--workers must be at least 1');
@@ -508,6 +516,7 @@ function printConfig() {
   const oneRemoteUserReqPerSec = CURRENT_USAGE.messagesPerLap / CURRENT_USAGE.lapSec;
   const avgChars = averageWeightedChars();
 
+  console.log("GT Coach Kokoro " + opts.device.toUpperCase() + " load benchmark");
   console.log('GT Coach current-load basis:');
   formatTable([
     {
@@ -773,7 +782,7 @@ async function main() {
     console.log(`Max sustainable simulated remote users: ${maxSustainableUsers}`);
     console.log(`Pass criteria: drained=true, errors=0, rejected=0, latePct <= ${opts.maxLatePct}%`);
 
-    const outputPath = path.join(opts.resultsDir, `kokoro-cpu-${runId}.json`);
+    const outputPath = path.join(opts.resultsDir, resultPrefix + "-" + runId + ".json");
     fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
     console.log(`Wrote JSON result: ${outputPath}`);
   } finally {

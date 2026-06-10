@@ -69,6 +69,38 @@ node kokoro-cpu-bench/bench.mjs \
   --drainSec=30
 ```
 
+## Local CUDA GPU Run
+
+The same harness can run through ONNX Runtime CUDA from Node:
+
+```bash
+pnpm bench:kokoro-gpu -- \
+  --workers=1 \
+  --dtype=fp32 \
+  --voices=af_heart \
+  --users=1,2,3,4 \
+  --bursts=1,2,4 \
+  --stageSec=120 \
+  --drainSec=60
+```
+
+For a quick CUDA smoke test:
+
+```bash
+pnpm bench:kokoro-gpu -- \
+  --workers=1 \
+  --dtype=fp32 \
+  --voices=af_heart \
+  --users=1 \
+  --bursts=1 \
+  --stageSec=10 \
+  --drainSec=30
+```
+
+This is CUDA, not browser WebGPU. The Node backend used by `kokoro-js` supports `cpu` and `cuda`; `webgpu` is only for the browser path. CUDA runs require a working NVIDIA driver plus CUDA/cuDNN runtime libraries visible to Node. If startup fails with `libcudnn.so.9: cannot open shared object file`, install cuDNN 9 or run inside a CUDA/cuDNN container.
+
+CUDA result files use the selected device in their name, for example `results/kokoro-cuda-*.json`.
+
 ## Docker Build
 
 Build an ARM64 image on Apple Silicon:
