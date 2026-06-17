@@ -230,7 +230,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      min-width: 820px;
+      min-width: 700px;
     }
     th,
     td {
@@ -265,7 +265,8 @@
     .row-actions {
       display: flex;
       gap: 6px;
-      justify-content: flex-end;
+      justify-content: flex-start;
+      margin-top: 8px;
     }
     .hidden { display: none !important; }
   </style>
@@ -348,7 +349,6 @@
                   <th>Audio</th>
                   <th>RTF</th>
                   <th>RMS</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="results-body"></tbody>
@@ -443,6 +443,10 @@
           <td>
             <strong>${model.label}</strong><br>
             <span class="muted">${model.modelId}</span>
+            <div class="row-actions">
+              <button class="btn btn-secondary btn-sm" data-action="play" data-id="${id}" disabled>Play</button>
+              <button class="btn btn-secondary btn-sm" data-action="download" data-id="${id}" disabled>WAV</button>
+            </div>
           </td>
           <td data-cell="status">${status}</td>
           <td data-cell="load">-</td>
@@ -450,12 +454,6 @@
           <td data-cell="duration">-</td>
           <td data-cell="rtf">-</td>
           <td data-cell="rms">-</td>
-          <td>
-            <div class="row-actions">
-              <button class="btn btn-secondary btn-sm" data-action="play" data-id="${id}" disabled>Play</button>
-              <button class="btn btn-secondary btn-sm" data-action="download" data-id="${id}" disabled>WAV</button>
-            </div>
-          </td>
         </tr>
       `;
     }
