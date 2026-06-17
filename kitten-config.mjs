@@ -68,6 +68,19 @@ export const KOKORO_MODELS = [
   },
 ];
 
+export const SUPERTONIC_MODELS = [
+  {
+    id: 'supertonic-node-cpu',
+    family: 'supertonic',
+    backend: 'node-cpu',
+    modelId: 'Supertone/supertonic-3',
+    label: 'Supertonic 3 Node CPU',
+    size: '~415 MB',
+    role: 'Multilingual candidate',
+    note: 'Code MIT; model OpenRAIL. English-only benchmark path for now.',
+  },
+];
+
 export const KITTEN_VOICES = [
   { id: 'Bella', label: 'Bella', gender: 'Female' },
   { id: 'Jasper', label: 'Jasper', gender: 'Male' },
@@ -85,6 +98,19 @@ export const KOKORO_VOICES = [
   { id: 'af_heart', label: 'Heart', gender: 'Female' },
   { id: 'af_bella', label: 'Bella', gender: 'Female' },
   { id: 'af_nova', label: 'Nova', gender: 'Female' },
+];
+
+export const SUPERTONIC_VOICES = [
+  { id: 'M1', label: 'M1', gender: 'Male' },
+  { id: 'M2', label: 'M2', gender: 'Male' },
+  { id: 'M3', label: 'M3', gender: 'Male' },
+  { id: 'M4', label: 'M4', gender: 'Male' },
+  { id: 'M5', label: 'M5', gender: 'Male' },
+  { id: 'F1', label: 'F1', gender: 'Female' },
+  { id: 'F2', label: 'F2', gender: 'Female' },
+  { id: 'F3', label: 'F3', gender: 'Female' },
+  { id: 'F4', label: 'F4', gender: 'Female' },
+  { id: 'F5', label: 'F5', gender: 'Female' },
 ];
 
 export const KITTEN_THREAD_OPTIONS = [
@@ -108,6 +134,20 @@ export const KOKORO_SPEED = {
   default: 1.3,
 };
 
+export const SUPERTONIC_SPEED = {
+  min: 0.7,
+  max: 2,
+  step: 0.05,
+  default: 1.05,
+};
+
+export const SUPERTONIC_STEPS = {
+  min: 5,
+  max: 12,
+  step: 1,
+  default: 8,
+};
+
 export function resolveKittenModel(value) {
   const found = KITTEN_MODELS.find((model) => model.id === value || model.modelId === value);
   if (!found) {
@@ -125,10 +165,31 @@ export function resolveKittenVoice(value) {
   return found.id;
 }
 
+export function resolveSupertonicVoice(value) {
+  const voice = value || 'M1';
+  const found = SUPERTONIC_VOICES.find((item) => item.id === voice);
+  if (!found) {
+    throw new Error(`Unsupported Supertonic voice style: ${voice}`);
+  }
+  return found.id;
+}
+
 export function clampKittenSpeed(value) {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed)) return KITTEN_SPEED.default;
   return Math.max(KITTEN_SPEED.min, Math.min(KITTEN_SPEED.max, parsed));
+}
+
+export function clampSupertonicSpeed(value) {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return SUPERTONIC_SPEED.default;
+  return Math.max(SUPERTONIC_SPEED.min, Math.min(SUPERTONIC_SPEED.max, parsed));
+}
+
+export function clampSupertonicSteps(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return SUPERTONIC_STEPS.default;
+  return Math.max(SUPERTONIC_STEPS.min, Math.min(SUPERTONIC_STEPS.max, parsed));
 }
 
 export function normalizeKittenThreads(value) {

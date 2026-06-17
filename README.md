@@ -49,7 +49,7 @@ This will:
 
 ## KittenTTS Benchmark
 
-This branch includes a local benchmark for KittenTTS Mini 80M, Micro 40M, Nano 15M fp32, Nano 15M int8, and the Kokoro 82M WebGPU/WASM/Node CPU paths used by the GT Coach WebGPU Voice Test.
+This branch includes a local benchmark for KittenTTS Mini 80M, Micro 40M, Nano 15M fp32, Nano 15M int8, Supertonic 3 Node CPU, and the Kokoro 82M WebGPU/WASM/Node CPU paths used by the GT Coach WebGPU Voice Test.
 
 ```bash
 pnpm install
@@ -57,8 +57,10 @@ pnpm serve
 ```
 
 Open `http://localhost:3000/kitten-benchmark.html` to generate and compare playable samples.
-The benchmark keeps separate voice/speed controls for KittenTTS and Kokoro so each family can be calibrated independently.
+The benchmark keeps separate voice/speed controls for KittenTTS, Kokoro, and Supertonic so each family can be calibrated independently.
 The KittenTTS Node path applies a small compatibility patch so text cleaning and voice style selection match the official Python KittenTTS implementation. Its thread selector is wired to ONNX Runtime Node `intraOpNumThreads`; non-auto runs pin `interOpNumThreads` to `1` and report the applied thread setting in the results table. Kokoro WebGPU/WASM/Node paths do not expose the same thread control through `kokoro-js`, so the benchmark labels those rows by backend instead of presenting a fake shared thread knob.
+Supertonic 3 uses the official ONNX CPU model layout from `Supertone/supertonic-3`; first run downloads roughly 415MB into `.cache/supertonic-3`. This benchmark currently exercises English only with the bundled M1-M5/F1-F5 voice styles, exposes Supertonic's total-step quality/speed knob, and reports the same ONNX Runtime thread setting as KittenTTS. Supertonic code is MIT; the model weights are OpenRAIL-M, so treat product use as license-review work before shipping.
+MeloTTS is intentionally deferred for now because the practical Node/Electron path needs a separate PyTorch or sherpa-onnx integration pass.
 The UI and saved WAV samples apply a small gain reduction only when raw output exceeds full scale; raw peak and clipping counts remain visible in the benchmark.
 
 For repeatable CLI results:

@@ -26,7 +26,7 @@ export async function prepareKittenNodeRuntime() {
   }
 }
 
-export function createKittenSessionOptions(numThreads) {
+export function createOnnxCpuSessionOptions(numThreads, scope = 'onnxruntime-node session intraOpNumThreads') {
   const sessionOptions = {
     executionProviders: ['cpu'],
   };
@@ -46,7 +46,7 @@ export function createKittenSessionOptions(numThreads) {
 
   const parsed = Number.parseInt(numThreads, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
-    throw new Error(`Invalid KittenTTS thread count: ${numThreads}`);
+    throw new Error(`Invalid ONNX Runtime thread count: ${numThreads}`);
   }
 
   const threads = Math.min(16, parsed);
@@ -63,10 +63,14 @@ export function createKittenSessionOptions(numThreads) {
       supported: true,
       requested: threads,
       applied: threads,
-      scope: 'onnxruntime-node session intraOpNumThreads',
+      scope,
       sessionOptions: appliedOptions,
     },
   };
+}
+
+export function createKittenSessionOptions(numThreads) {
+  return createOnnxCpuSessionOptions(numThreads, 'onnxruntime-node session intraOpNumThreads');
 }
 
 export function installKittenNodeThreadedLoader(KittenTTS, { downloadModel, loadNpz }) {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GT Coach - KittenTTS Benchmark</title>
+  <title>GT Coach - TTS Benchmark</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -301,12 +301,12 @@
 </head>
 <body>
   <div class="container">
-    <nav><a href="/">Voice Test</a> / KittenTTS Benchmark</nav>
+    <nav><a href="/">Voice Test</a> / TTS Benchmark</nav>
 
     <div class="top-bar">
       <div>
-        <h1>KittenTTS Benchmark</h1>
-        <p>Local Node CPU comparison for Kitten Mini, Micro, Nano fp32, and Nano int8 using GT Coach messages.</p>
+        <h1>TTS Benchmark</h1>
+        <p>Local comparison for KittenTTS, Kokoro, and Supertonic candidates using GT Coach messages.</p>
       </div>
       <div class="actions">
         <button class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
@@ -468,11 +468,13 @@
         const key = panel.dataset.familyPanel;
         const voice = panel.querySelector('[data-family-voice]')?.value;
         const speed = Number(panel.querySelector('[data-family-speed]')?.value);
+        const steps = Number(panel.querySelector('[data-family-steps]')?.value);
         const threads = panel.querySelector('[data-family-threads]')?.value;
         const cleanInput = panel.querySelector('[data-family-clean]');
         family[key] = {
           voice,
           speed,
+          ...(Number.isFinite(steps) ? { steps } : {}),
           ...(threads ? { threads } : {}),
           ...(cleanInput ? { clean: cleanInput.checked } : {}),
         };
@@ -518,6 +520,16 @@
       if (!Number.isFinite(value)) return value;
       const multiplier = 10 ** digits;
       return Math.round(value * multiplier) / multiplier;
+    }
+
+    function sliderDecimals(step) {
+      const normalized = String(step ?? '1');
+      const decimal = normalized.includes('.') ? normalized.split('.')[1].length : 0;
+      return Math.min(3, decimal);
+    }
+
+    function formatSpeed(value, step) {
+      return `${Number(value).toFixed(sliderDecimals(step))}x`;
     }
 
     function audioStats(samples) {
@@ -610,7 +622,7 @@
                 </div>
               ` : ''}
               <div class="field">
-                <label for="${family}-speed">Speed <span data-family-speed-value="${family}">${Number(control.speed.default).toFixed(1)}x</span></label>
+                <label for="${family}-speed">Speed <span data-family-speed-value="${family}">${formatSpeed(control.speed.default, control.speed.step)}</span></label>
                 <input
                   type="range"
                   id="${family}-speed"
@@ -621,6 +633,21 @@
                   value="${control.speed.default}"
                 >
               </div>
+              ${control.steps ? `
+                <div class="field">
+                  <label for="${family}-steps">${control.stepLabel || 'Steps'} <span data-family-steps-value="${family}">${Number(control.steps.default).toFixed(0)}</span></label>
+                  <input
+                    type="range"
+                    id="${family}-steps"
+                    data-family-steps="${family}"
+                    min="${control.steps.min}"
+                    max="${control.steps.max}"
+                    step="${control.steps.step}"
+                    value="${control.steps.default}"
+                  >
+                  ${control.stepNote ? `<div class="field-note">${control.stepNote}</div>` : ''}
+                </div>
+              ` : ''}
               ${family === 'kitten' ? `
                 <label class="inline-check">
                   <input type="checkbox" data-family-clean="${family}" ${control.clean ? 'checked' : ''}>
@@ -667,6 +694,8 @@
         const threadSelect = document.querySelector(`[data-family-threads="${family}"]`);
         const speedInput = document.querySelector(`[data-family-speed="${family}"]`);
         const speedValue = document.querySelector(`[data-family-speed-value="${family}"]`);
+        const stepsInput = document.querySelector(`[data-family-steps="${family}"]`);
+        const stepsValue = document.querySelector(`[data-family-steps-value="${family}"]`);
         const cleanInput = document.querySelector(`[data-family-clean="${family}"]`);
 
         if (voiceSelect && (saved.voice || legacyVoice) && optionExists(voiceSelect, saved.voice || legacyVoice)) {
@@ -679,7 +708,13 @@
         if (speedInput && Number.isFinite(speed)) {
           const nextSpeed = clamp(speed, control.speed.min, control.speed.max);
           speedInput.value = nextSpeed;
-          if (speedValue) speedValue.textContent = `${nextSpeed.toFixed(1)}x`;
+          if (speedValue) speedValue.textContent = formatSpeed(nextSpeed, control.speed.step);
+        }
+        const steps = Number.isFinite(saved.steps) ? saved.steps : null;
+        if (stepsInput && Number.isFinite(steps)) {
+          const nextSteps = clamp(steps, control.steps.min, control.steps.max);
+          stepsInput.value = nextSteps;
+          if (stepsValue) stepsValue.textContent = String(Math.round(nextSteps));
         }
         const clean = typeof saved.clean === 'boolean' ? saved.clean : legacyClean;
         if (cleanInput && typeof clean === 'boolean') {
@@ -1025,9 +1060,11 @@
 
     function getFamilyOptions(family) {
       const speed = Number(document.querySelector(`[data-family-speed="${family}"]`)?.value);
+      const totalSteps = Number(document.querySelector(`[data-family-steps="${family}"]`)?.value);
       return {
         voice: document.querySelector(`[data-family-voice="${family}"]`)?.value,
         speed: Number.isFinite(speed) ? speed : 1,
+        ...(Number.isFinite(totalSteps) ? { totalSteps } : {}),
         clean: document.querySelector(`[data-family-clean="${family}"]`)?.checked,
         numThreads: document.querySelector(`[data-family-threads="${family}"]`)?.value,
       };
@@ -1086,6 +1123,12 @@
       return result;
     }
 
+    async function generateSupertonic(model, common) {
+      const result = await postJson('/api/supertonic/generate', common);
+      result.browserSamples = decodeFloat32(result.audio);
+      return result;
+    }
+
     async function generateKokoroNode(model, common) {
       const url = `/api/generate?text=${encodeURIComponent(common.text)}&voice=${encodeURIComponent(common.voice || model.voice || 'am_adam')}&speed=${encodeURIComponent(common.speed)}`;
       const response = await fetch(url);
@@ -1139,6 +1182,9 @@
       }
       if (model.family === 'kokoro') {
         return generateKokoroBrowser(model, common);
+      }
+      if (model.family === 'supertonic') {
+        return generateSupertonic(model, common);
       }
       return generateKitten(model, common);
     }
@@ -1253,7 +1299,14 @@
       if (speed) {
         const family = speed.dataset.familySpeed;
         const value = document.querySelector(`[data-family-speed-value="${family}"]`);
-        if (value) value.textContent = `${Number(speed.value).toFixed(1)}x`;
+        const control = state.config?.familyControls?.[family];
+        if (value) value.textContent = formatSpeed(speed.value, control?.speed?.step);
+      }
+      const steps = event.target.closest('[data-family-steps]');
+      if (steps) {
+        const family = steps.dataset.familySteps;
+        const value = document.querySelector(`[data-family-steps-value="${family}"]`);
+        if (value) value.textContent = String(Math.round(Number(steps.value)));
       }
       saveSettings();
     });

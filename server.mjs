@@ -10,14 +10,21 @@ import {
   KOKORO_MODELS,
   KOKORO_SPEED,
   KOKORO_VOICES,
+  SUPERTONIC_MODELS,
+  SUPERTONIC_SPEED,
+  SUPERTONIC_STEPS,
+  SUPERTONIC_VOICES,
   KITTEN_SAMPLE_RATE,
   KITTEN_SPEED,
   KITTEN_THREAD_OPTIONS,
   KITTEN_VOICES,
   clampKittenSpeed,
+  clampSupertonicSpeed,
+  clampSupertonicSteps,
   normalizeKittenThreads,
   resolveKittenModel,
   resolveKittenVoice,
+  resolveSupertonicVoice,
 } from './kitten-config.mjs';
 import {
   audioStats,
@@ -28,12 +35,16 @@ import {
   registerKittenModels,
   withKittenCacheHome,
 } from './kitten-runtime.mjs';
+import { loadSupertonicModel } from './supertonic-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const KITTEN_CACHE_DIR = path.join(__dirname, '.cache', 'kitten-tts');
+const SUPERTONIC_CACHE_DIR = path.join(__dirname, '.cache', 'supertonic-3');
 const kittenModelCache = new Map();
 const kittenModelLoads = new Map();
+const supertonicModelCache = new Map();
+const supertonicModelLoads = new Map();
 
 // ── MIME types ──────────────────────────────────────────────────────
 const MIME = {
@@ -166,6 +177,26 @@ function publicKittenModel(entry, currentLoadMs = 0, cacheHit = true) {
   };
 }
 
+function publicSupertonicModel(entry, currentLoadMs = 0, cacheHit = true) {
+  return {
+    id: entry.modelInfo.id,
+    modelId: entry.modelInfo.modelId,
+    label: entry.modelInfo.label,
+    size: entry.modelInfo.size,
+    role: entry.modelInfo.role,
+    note: entry.modelInfo.note,
+    threads: entry.threads,
+    voices: entry.voices,
+    runtime: entry.runtime,
+    executionProviders: entry.executionProviders,
+    threading: entry.threading,
+    loadMs: Math.round(currentLoadMs),
+    modelLoadMs: Math.round(entry.loadMs),
+    cached: cacheHit,
+    loadedAt: entry.loadedAt,
+  };
+}
+
 async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
   const modelInfo = resolveKittenModel(modelId);
   const threads = normalizeKittenThreads(numThreads);
@@ -228,6 +259,53 @@ async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
   }
 }
 
+async function getSupertonicModel(numThreads = 'auto') {
+  const modelInfo = SUPERTONIC_MODELS[0];
+  const threads = normalizeKittenThreads(numThreads);
+  const key = modelCacheKey(modelInfo.modelId, threads);
+
+  if (supertonicModelCache.has(key)) {
+    const entry = supertonicModelCache.get(key);
+    return { entry, cacheHit: true, currentLoadMs: 0 };
+  }
+
+  if (supertonicModelLoads.has(key)) {
+    const entry = await supertonicModelLoads.get(key);
+    return { entry, cacheHit: false, currentLoadMs: entry.loadMs };
+  }
+
+  const loadPromise = (async () => {
+    const start = performance.now();
+    const model = await loadSupertonicModel({
+      cacheDir: SUPERTONIC_CACHE_DIR,
+      numThreads: threads,
+      voices: SUPERTONIC_VOICES,
+    });
+    const loadMs = performance.now() - start;
+    const entry = {
+      model,
+      modelInfo,
+      threads,
+      voices: SUPERTONIC_VOICES.map((voice) => voice.id),
+      loadMs,
+      loadedAt: new Date().toISOString(),
+      runtime: model.runtime || 'cpu',
+      executionProviders: model.executionProviders || [],
+      threading: model.threading || null,
+    };
+    supertonicModelCache.set(key, entry);
+    return entry;
+  })();
+
+  supertonicModelLoads.set(key, loadPromise);
+  try {
+    const entry = await loadPromise;
+    return { entry, cacheHit: false, currentLoadMs: entry.loadMs };
+  } finally {
+    supertonicModelLoads.delete(key);
+  }
+}
+
 function audioDataToBase64(audioData) {
   const buf = Buffer.from(audioData.buffer, audioData.byteOffset, audioData.byteLength);
   return buf.toString('base64');
@@ -243,6 +321,7 @@ async function handleKittenConfig(req, res) {
     models: [
       ...KITTEN_MODELS.map((model) => ({ ...model, family: 'kitten' })),
       ...KOKORO_MODELS,
+      ...SUPERTONIC_MODELS,
     ],
     voices: KITTEN_VOICES,
     familyControls: {
@@ -263,6 +342,19 @@ async function handleKittenConfig(req, res) {
         defaultVoice: 'am_adam',
         speed: KOKORO_SPEED,
       },
+      supertonic: {
+        label: 'Supertonic 3',
+        voices: SUPERTONIC_VOICES,
+        defaultVoice: 'M1',
+        speed: SUPERTONIC_SPEED,
+        threads: KITTEN_THREAD_OPTIONS,
+        defaultThreads: 'auto',
+        threadLabel: 'ORT intra-op threads',
+        threadNote: 'Applied to Supertonic Node CPU sessions only. Auto leaves ONNX Runtime in its default CPU-thread mode.',
+        steps: SUPERTONIC_STEPS,
+        stepLabel: 'Total steps',
+        stepNote: 'Higher usually improves quality but is slower. Supertonic default is 8.',
+      },
     },
     sampleRate: KITTEN_SAMPLE_RATE,
     speed: KITTEN_SPEED,
@@ -274,6 +366,67 @@ async function handleKittenConfig(req, res) {
       ...sentence,
     })),
   });
+}
+
+async function handleSupertonicGenerate(req, res) {
+  if (req.method !== 'POST') {
+    methodNotAllowed(res, 'POST');
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const text = String(body.text || KITTEN_DEFAULT_TEXT).trim();
+    if (!text) {
+      writeJson(res, 400, { error: 'Missing "text" field' });
+      return;
+    }
+
+    const voice = resolveSupertonicVoice(body.voice);
+    const speed = clampSupertonicSpeed(body.speed);
+    const totalSteps = clampSupertonicSteps(body.totalSteps);
+    const { entry, cacheHit, currentLoadMs } = await getSupertonicModel(body.numThreads);
+
+    const start = performance.now();
+    const audio = await entry.model.generate(text, {
+      voice,
+      lang: 'en',
+      speed,
+      totalSteps,
+    });
+    const genTimeMs = performance.now() - start;
+    const data = audio.wav instanceof Float32Array ? audio.wav : new Float32Array(audio.wav);
+    const sampleRate = entry.model.sampleRate || 44100;
+    const audioDurationSec = audio.duration?.[0] || data.length / sampleRate;
+    const rtf = audioDurationSec / (genTimeMs / 1000);
+    const stats = audioStats(data);
+    const playbackGain = playbackGainForPeak(stats.peak);
+
+    writeJson(res, 200, {
+      model: publicSupertonicModel(entry, currentLoadMs, cacheHit),
+      text,
+      voice,
+      speed,
+      totalSteps,
+      lang: 'en',
+      audio: audioDataToBase64(data),
+      sampleRate,
+      samples: data.length,
+      audioDurationSec: round(audioDurationSec, 3),
+      genTimeMs: Math.round(genTimeMs),
+      rtf: round(rtf, 2),
+      min: round(stats.min, 6),
+      max: round(stats.max, 6),
+      peak: round(stats.peak, 6),
+      rms: round(stats.rms, 6),
+      clipCount: stats.clipCount,
+      clipPercent: round(stats.clipPercent, 4),
+      nanCount: stats.nanCount,
+      playbackGain: round(playbackGain, 6),
+    });
+  } catch (e) {
+    writeJson(res, 500, { error: e.message });
+  }
 }
 
 async function handleKittenLoad(req, res) {
@@ -537,6 +690,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/kitten/config') return handleKittenConfig(req, res);
   if (url.pathname === '/api/kitten/load') return handleKittenLoad(req, res);
   if (url.pathname === '/api/kitten/generate') return handleKittenGenerate(req, res);
+  if (url.pathname === '/api/supertonic/generate') return handleSupertonicGenerate(req, res);
   if (url.pathname === '/api/generate') return handleGenerate(req, res);
   if (url.pathname === '/api/wpm') return handleWpm(req, res);
 
@@ -547,7 +701,7 @@ server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}/`);
   console.log(`  Voice test:     http://localhost:${PORT}/index.html`);
   console.log(`  WPM benchmark:  http://localhost:${PORT}/wpm-benchmark.html`);
-  console.log(`  Kitten bench:   http://localhost:${PORT}/kitten-benchmark.html`);
+  console.log(`  TTS benchmark:  http://localhost:${PORT}/kitten-benchmark.html`);
   console.log();
   console.log('Model will load on first API request.');
 });
