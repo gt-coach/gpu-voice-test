@@ -7,6 +7,7 @@
     "benchmark": "node benchmark.mjs",
     "bench:kokoro-cpu": "node kokoro-cpu-bench/bench.mjs",
     "bench:kokoro-gpu": "node kokoro-cpu-bench/bench.mjs --device=cuda",
+    "bench:kitten": "node kitten-bench/bench.mjs",
     "serve": "node server.mjs"
   },
   "engines": {
@@ -21,6 +22,7 @@
   },
   "packageManager": "pnpm@10.28.2",
   "dependencies": {
+    "kitten-tts-js": "0.1.2",
     "kokoro-js": "^1.2.1",
     "onnxruntime-node": "1.21.0"
   }

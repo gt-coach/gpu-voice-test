@@ -3,9 +3,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SENTENCES, VOICES, SAMPLE_RATE } from './sentences.mjs';
+import {
+  KITTEN_DEFAULT_TEXT,
+  KITTEN_MODELS,
+  KITTEN_SAMPLE_RATE,
+  KITTEN_SPEED,
+  KITTEN_THREAD_OPTIONS,
+  KITTEN_VOICES,
+  clampKittenSpeed,
+  normalizeKittenThreads,
+  resolveKittenModel,
+  resolveKittenVoice,
+} from './kitten-config.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const KITTEN_CACHE_DIR = path.join(__dirname, '.cache', 'kitten-tts');
+const kittenModelCache = new Map();
+const kittenModelLoads = new Map();
 
 // ── MIME types ──────────────────────────────────────────────────────
 const MIME = {
@@ -59,6 +74,254 @@ function rmsEnergy(audio) {
   let sum = 0;
   for (let i = 0; i < audio.length; i++) sum += audio[i] * audio[i];
   return Math.sqrt(sum / audio.length);
+}
+
+function round(value, digits = 2) {
+  if (!Number.isFinite(value)) return value;
+  const multiplier = 10 ** digits;
+  return Math.round(value * multiplier) / multiplier;
+}
+
+function writeJson(res, statusCode, payload) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function methodNotAllowed(res, allowed) {
+  res.writeHead(405, {
+    'Content-Type': 'application/json',
+    'Allow': allowed,
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(JSON.stringify({ error: `Method not allowed. Use ${allowed}.` }));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 128 * 1024) {
+        reject(new Error('Request body is too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('Request body must be valid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function modelCacheKey(modelId, threads) {
+  return `${modelId}::threads=${threads}`;
+}
+
+function publicKittenModel(entry, currentLoadMs = 0, cacheHit = true) {
+  return {
+    id: entry.modelInfo.id,
+    modelId: entry.modelInfo.modelId,
+    label: entry.modelInfo.label,
+    size: entry.modelInfo.size,
+    role: entry.modelInfo.role,
+    note: entry.modelInfo.note,
+    threads: entry.threads,
+    voices: entry.voices,
+    runtime: entry.runtime,
+    runtimeRequested: entry.runtimeRequested,
+    executionProviders: entry.executionProviders,
+    loadMs: Math.round(currentLoadMs),
+    modelLoadMs: Math.round(entry.loadMs),
+    cached: cacheHit,
+    loadedAt: entry.loadedAt,
+  };
+}
+
+async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
+  const modelInfo = resolveKittenModel(modelId);
+  const threads = normalizeKittenThreads(numThreads);
+  const key = modelCacheKey(modelInfo.modelId, threads);
+
+  if (kittenModelCache.has(key)) {
+    const entry = kittenModelCache.get(key);
+    return { entry, cacheHit: true, currentLoadMs: 0 };
+  }
+
+  if (kittenModelLoads.has(key)) {
+    const entry = await kittenModelLoads.get(key);
+    return { entry, cacheHit: false, currentLoadMs: entry.loadMs };
+  }
+
+  const loadPromise = (async () => {
+    fs.mkdirSync(KITTEN_CACHE_DIR, { recursive: true });
+    const { KittenTTS, MODELS } = await import('kitten-tts-js');
+    for (const model of KITTEN_MODELS) {
+      MODELS[model.modelId] ??= { label: model.label };
+    }
+    await prepareKittenNodeRuntime();
+    const options = {
+      runtime: 'cpu',
+      cacheDir: KITTEN_CACHE_DIR,
+    };
+    if (threads !== 'auto') {
+      options.numThreads = threads;
+    }
+
+    const start = performance.now();
+    const model = await withKittenCacheHome(() => KittenTTS.from_pretrained(modelInfo.modelId, options));
+    const loadMs = performance.now() - start;
+    const voices = typeof model.list_voices === 'function'
+      ? model.list_voices()
+      : KITTEN_VOICES.map((voice) => voice.id);
+
+    const entry = {
+      model,
+      modelInfo,
+      threads,
+      voices,
+      loadMs,
+      loadedAt: new Date().toISOString(),
+      runtime: model.runtime || 'cpu',
+      runtimeRequested: model.runtimeRequested || 'cpu',
+      executionProviders: model.executionProviders || [],
+    };
+    kittenModelCache.set(key, entry);
+    return entry;
+  })();
+
+  kittenModelLoads.set(key, loadPromise);
+  try {
+    const entry = await loadPromise;
+    return { entry, cacheHit: false, currentLoadMs: entry.loadMs };
+  } finally {
+    kittenModelLoads.delete(key);
+  }
+}
+
+function audioDataToBase64(audioData) {
+  const buf = Buffer.from(audioData.buffer, audioData.byteOffset, audioData.byteLength);
+  return buf.toString('base64');
+}
+
+async function withKittenCacheHome(fn) {
+  const previousHome = process.env.HOME;
+  process.env.HOME = __dirname;
+  try {
+    return await fn();
+  } finally {
+    if (previousHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+  }
+}
+
+async function prepareKittenNodeRuntime() {
+  const ort = await import('onnxruntime-node');
+  if (ort.env?.wasm) {
+    ort.env.trace = false;
+    ort.env.wasm = undefined;
+  }
+}
+
+async function handleKittenConfig(req, res) {
+  if (req.method !== 'GET') {
+    methodNotAllowed(res, 'GET');
+    return;
+  }
+
+  writeJson(res, 200, {
+    models: KITTEN_MODELS,
+    voices: KITTEN_VOICES,
+    sampleRate: KITTEN_SAMPLE_RATE,
+    speed: KITTEN_SPEED,
+    threads: KITTEN_THREAD_OPTIONS,
+    defaultText: KITTEN_DEFAULT_TEXT,
+    messages: SENTENCES.map((sentence, index) => ({
+      id: `${sentence.cascade}-${index + 1}`,
+      ...sentence,
+    })),
+  });
+}
+
+async function handleKittenLoad(req, res) {
+  if (req.method !== 'POST') {
+    methodNotAllowed(res, 'POST');
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const { entry, cacheHit, currentLoadMs } = await getKittenModel(body.modelId, body.numThreads);
+    writeJson(res, 200, {
+      model: publicKittenModel(entry, currentLoadMs, cacheHit),
+    });
+  } catch (e) {
+    writeJson(res, 500, { error: e.message });
+  }
+}
+
+async function handleKittenGenerate(req, res) {
+  if (req.method !== 'POST') {
+    methodNotAllowed(res, 'POST');
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const text = String(body.text || KITTEN_DEFAULT_TEXT).trim();
+    if (!text) {
+      writeJson(res, 400, { error: 'Missing "text" field' });
+      return;
+    }
+
+    const voice = resolveKittenVoice(body.voice);
+    const speed = clampKittenSpeed(body.speed);
+    const clean = body.clean !== false;
+    const { entry, cacheHit, currentLoadMs } = await getKittenModel(body.modelId, body.numThreads);
+
+    const start = performance.now();
+    const audio = await entry.model.generate(text, { voice, speed, clean });
+    const genTimeMs = performance.now() - start;
+    const data = audio.data instanceof Float32Array ? audio.data : new Float32Array(audio.data);
+    const sampleRate = audio.sampling_rate || KITTEN_SAMPLE_RATE;
+    const audioDurationSec = audio.duration || data.length / sampleRate;
+    const rtf = audioDurationSec / (genTimeMs / 1000);
+    const rms = rmsEnergy(data);
+
+    writeJson(res, 200, {
+      model: publicKittenModel(entry, currentLoadMs, cacheHit),
+      text,
+      voice,
+      speed,
+      clean,
+      audio: audioDataToBase64(data),
+      sampleRate,
+      samples: data.length,
+      audioDurationSec: round(audioDurationSec, 3),
+      genTimeMs: Math.round(genTimeMs),
+      rtf: round(rtf, 2),
+      rms: round(rms, 6),
+    });
+  } catch (e) {
+    writeJson(res, 500, { error: e.message });
+  }
 }
 
 // ── API: single generation ──────────────────────────────────────────
@@ -237,6 +500,19 @@ function serveStatic(pathname, res) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === '/api/kitten/config') return handleKittenConfig(req, res);
+  if (url.pathname === '/api/kitten/load') return handleKittenLoad(req, res);
+  if (url.pathname === '/api/kitten/generate') return handleKittenGenerate(req, res);
   if (url.pathname === '/api/generate') return handleGenerate(req, res);
   if (url.pathname === '/api/wpm') return handleWpm(req, res);
 
@@ -247,6 +523,7 @@ server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}/`);
   console.log(`  Voice test:     http://localhost:${PORT}/index.html`);
   console.log(`  WPM benchmark:  http://localhost:${PORT}/wpm-benchmark.html`);
+  console.log(`  Kitten bench:   http://localhost:${PORT}/kitten-benchmark.html`);
   console.log();
   console.log('Model will load on first API request.');
 });

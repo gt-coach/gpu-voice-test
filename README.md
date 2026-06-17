@@ -46,3 +46,22 @@ This will:
 - Node.js 18+
 - ~330MB disk space for model cache
 - Works on macOS (arm64/x64), Windows (x64), Linux (x64/arm64)
+
+## KittenTTS Benchmark
+
+This branch includes a local benchmark for KittenTTS Micro 40M, Nano 15M fp32, and Nano 15M int8.
+
+```bash
+pnpm install
+pnpm serve
+```
+
+Open `http://localhost:3000/kitten-benchmark.html` to generate and compare playable samples.
+
+For repeatable CLI results:
+
+```bash
+pnpm bench:kitten
+```
+
+The CLI writes JSON/CSV reports to `kitten-results/` and WAV samples to `kitten-samples/`.

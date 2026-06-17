@@ -6,3 +6,5 @@ samples/
 kokoro-cache/
 kokoro-results/
 kokoro-samples/
+kitten-results/
+kitten-samples/
