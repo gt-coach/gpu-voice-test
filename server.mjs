@@ -8,6 +8,8 @@ import {
   KITTEN_DEFAULT_TEXT,
   KITTEN_MODELS,
   KOKORO_MODELS,
+  KOKORO_SPEED,
+  KOKORO_VOICES,
   KITTEN_SAMPLE_RATE,
   KITTEN_SPEED,
   KITTEN_THREAD_OPTIONS,
@@ -20,6 +22,7 @@ import {
 import {
   audioStats,
   installKittenPythonCompat,
+  installKittenNodeThreadedLoader,
   playbackGainForPeak,
   prepareKittenNodeRuntime,
   registerKittenModels,
@@ -155,6 +158,7 @@ function publicKittenModel(entry, currentLoadMs = 0, cacheHit = true) {
     runtime: entry.runtime,
     runtimeRequested: entry.runtimeRequested,
     executionProviders: entry.executionProviders,
+    threading: entry.threading,
     loadMs: Math.round(currentLoadMs),
     modelLoadMs: Math.round(entry.loadMs),
     cached: cacheHit,
@@ -179,8 +183,9 @@ async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
 
   const loadPromise = (async () => {
     fs.mkdirSync(KITTEN_CACHE_DIR, { recursive: true });
-    const { KittenTTS, MODELS } = await import('kitten-tts-js');
+    const { KittenTTS, MODELS, downloadModel, loadNpz } = await import('kitten-tts-js');
     registerKittenModels(MODELS, KITTEN_MODELS);
+    installKittenNodeThreadedLoader(KittenTTS, { downloadModel, loadNpz });
     installKittenPythonCompat(KittenTTS);
     await prepareKittenNodeRuntime();
     const options = {
@@ -208,6 +213,7 @@ async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
       runtime: model.runtime || 'cpu',
       runtimeRequested: model.runtimeRequested || 'cpu',
       executionProviders: model.executionProviders || [],
+      threading: model.threading || null,
     };
     kittenModelCache.set(key, entry);
     return entry;
@@ -239,6 +245,25 @@ async function handleKittenConfig(req, res) {
       ...KOKORO_MODELS,
     ],
     voices: KITTEN_VOICES,
+    familyControls: {
+      kitten: {
+        label: 'KittenTTS',
+        voices: KITTEN_VOICES,
+        defaultVoice: KITTEN_DEFAULT_VOICE,
+        speed: KITTEN_SPEED,
+        clean: true,
+        threads: KITTEN_THREAD_OPTIONS,
+        defaultThreads: 'auto',
+        threadLabel: 'ORT intra-op threads',
+        threadNote: 'Applied to Kitten Node CPU sessions only. Auto leaves ONNX Runtime in its default CPU-thread mode.',
+      },
+      kokoro: {
+        label: 'Kokoro',
+        voices: KOKORO_VOICES,
+        defaultVoice: 'am_adam',
+        speed: KOKORO_SPEED,
+      },
+    },
     sampleRate: KITTEN_SAMPLE_RATE,
     speed: KITTEN_SPEED,
     threads: KITTEN_THREAD_OPTIONS,

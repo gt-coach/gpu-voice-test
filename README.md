@@ -57,7 +57,9 @@ pnpm serve
 ```
 
 Open `http://localhost:3000/kitten-benchmark.html` to generate and compare playable samples.
-The Node path applies a small compatibility patch so text cleaning and voice style selection match the official Python KittenTTS implementation. The UI and saved WAV samples apply a small gain reduction only when raw output exceeds full scale; raw peak and clipping counts remain visible in the benchmark.
+The benchmark keeps separate voice/speed controls for KittenTTS and Kokoro so each family can be calibrated independently.
+The KittenTTS Node path applies a small compatibility patch so text cleaning and voice style selection match the official Python KittenTTS implementation. Its thread selector is wired to ONNX Runtime Node `intraOpNumThreads`; non-auto runs pin `interOpNumThreads` to `1` and report the applied thread setting in the results table. Kokoro WebGPU/WASM/Node paths do not expose the same thread control through `kokoro-js`, so the benchmark labels those rows by backend instead of presenting a fake shared thread knob.
+The UI and saved WAV samples apply a small gain reduction only when raw output exceeds full scale; raw peak and clipping counts remain visible in the benchmark.
 
 For repeatable CLI results:
 

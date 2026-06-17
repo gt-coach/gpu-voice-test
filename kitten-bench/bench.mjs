@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { KittenTTS, MODELS as KITTEN_JS_MODELS, encodeWav } from 'kitten-tts-js';
+import { KittenTTS, MODELS as KITTEN_JS_MODELS, downloadModel, encodeWav, loadNpz } from 'kitten-tts-js';
 import { SENTENCES } from '../sentences.mjs';
 import {
   KITTEN_MODELS,
@@ -16,6 +16,7 @@ import {
 import {
   audioStats,
   applyGain,
+  installKittenNodeThreadedLoader,
   installKittenPythonCompat,
   playbackGainForPeak,
   prepareKittenNodeRuntime,
@@ -66,6 +67,8 @@ function writeCsv(filePath, rows) {
     'modelId',
     'voice',
     'tier',
+    'threadsRequested',
+    'threadsApplied',
     'wordCount',
     'genTimeMs',
     'audioDurationSec',
@@ -132,6 +135,7 @@ const messages = SENTENCES
   .slice(0, opts.limit > 0 ? opts.limit : undefined);
 
 registerKittenModels(KITTEN_JS_MODELS, KITTEN_MODELS);
+installKittenNodeThreadedLoader(KittenTTS, { downloadModel, loadNpz });
 installKittenPythonCompat(KittenTTS);
 
 if (messages.length === 0) {
@@ -158,7 +162,8 @@ for (const modelInfo of models) {
   await prepareKittenNodeRuntime();
   const model = await withKittenCacheHome(rootDir, () => KittenTTS.from_pretrained(modelInfo.modelId, modelOptions));
   const loadMs = performance.now() - loadStart;
-  console.log(`Loaded in ${Math.round(loadMs)}ms`);
+  const threading = model.threading || { requested: opts.threads, applied: 'runtime-default' };
+  console.log(`Loaded in ${Math.round(loadMs)}ms (${threading.applied === 'auto' ? 'ORT auto' : `${threading.applied} intra`} threads)`);
 
   for (const voice of voices) {
     for (const message of messages) {
@@ -167,6 +172,8 @@ for (const modelInfo of models) {
         modelId: modelInfo.modelId,
         voice,
         tier: message.cascade,
+        threadsRequested: threading.requested,
+        threadsApplied: threading.applied,
         wordCount: message.wordCount,
         text: message.text,
         loadMs: Math.round(loadMs),

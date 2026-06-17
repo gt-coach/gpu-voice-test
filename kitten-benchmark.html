@@ -102,6 +102,12 @@
       margin-bottom: 14px;
     }
     .field:last-child { margin-bottom: 0; }
+    .field-note {
+      color: #777b8f;
+      font-size: 11px;
+      line-height: 1.4;
+      margin-top: 6px;
+    }
     label,
     .field-label {
       display: block;
@@ -177,6 +183,28 @@
       font-weight: 500;
     }
     .inline-check input { accent-color: #6366f1; }
+    .family-list {
+      display: grid;
+      gap: 12px;
+    }
+    .family-panel {
+      padding: 12px;
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+    }
+    .family-panel h3 {
+      color: #fff;
+      font-size: 13px;
+      font-weight: 650;
+      margin-bottom: 10px;
+    }
+    .family-panel .field {
+      margin-bottom: 10px;
+    }
+    .family-panel .inline-check {
+      margin-top: 4px;
+    }
     .status-banner {
       display: none;
       padding: 12px 14px;
@@ -230,7 +258,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      min-width: 900px;
+      min-width: 980px;
     }
     th,
     td {
@@ -294,29 +322,16 @@
         </div>
 
         <div class="card">
-          <h2>Voice</h2>
-          <div class="split">
-            <div class="field">
-              <label for="voice-select">Voice</label>
-              <select id="voice-select"></select>
-            </div>
-            <div class="field">
-              <label for="threads-select">Threads</label>
-              <select id="threads-select"></select>
-            </div>
-          </div>
+          <h2>Family Controls</h2>
+          <div id="family-controls"></div>
+        </div>
+
+        <div class="card">
+          <h2>Playback</h2>
           <div class="field">
-            <label for="effect-select">Playback effect</label>
+            <label for="effect-select">Effect</label>
             <select id="effect-select"></select>
           </div>
-          <div class="field">
-            <label for="speed-slider">Speed <span id="speed-value">1.0x</span></label>
-            <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0">
-          </div>
-          <label class="inline-check">
-            <input type="checkbox" id="clean-toggle" checked>
-            Clean text
-          </label>
         </div>
 
         <div class="card">
@@ -348,6 +363,7 @@
                 <tr>
                   <th>Model</th>
                   <th>Status</th>
+                  <th>Threading</th>
                   <th>Load</th>
                   <th>Generation</th>
                   <th>Audio</th>
@@ -447,15 +463,27 @@
 
     function saveSettings() {
       if (!state.config) return;
+      const family = {};
+      document.querySelectorAll('[data-family-panel]').forEach((panel) => {
+        const key = panel.dataset.familyPanel;
+        const voice = panel.querySelector('[data-family-voice]')?.value;
+        const speed = Number(panel.querySelector('[data-family-speed]')?.value);
+        const threads = panel.querySelector('[data-family-threads]')?.value;
+        const cleanInput = panel.querySelector('[data-family-clean]');
+        family[key] = {
+          voice,
+          speed,
+          ...(threads ? { threads } : {}),
+          ...(cleanInput ? { clean: cleanInput.checked } : {}),
+        };
+      });
+
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({
         models: [...document.querySelectorAll('[data-model-checkbox]')]
           .filter((input) => input.checked)
           .map((input) => input.value),
-        voice: $('voice-select').value,
-        threads: $('threads-select').value,
         effect: $('effect-select').value,
-        speed: Number($('speed-slider').value),
-        clean: $('clean-toggle').checked,
+        family,
         messageId: $('message-select').value,
         text: $('text-input').value,
       }));
@@ -536,7 +564,11 @@
     }
 
     function renderModels(models) {
-      const savedModels = Array.isArray(state.settings.models) ? state.settings.models : null;
+      const currentIds = new Set(models.flatMap((model) => [model.id, model.modelId]));
+      const validSavedModels = Array.isArray(state.settings.models)
+        ? state.settings.models.filter((id) => currentIds.has(id))
+        : null;
+      const savedModels = validSavedModels?.length ? validSavedModels : null;
       $('model-list').innerHTML = models.map((model) => `
         <label class="model-choice">
           <input type="checkbox" data-model-checkbox value="${model.id}" ${!savedModels || savedModels.includes(model.id) || savedModels.includes(model.modelId) ? 'checked' : ''}>
@@ -551,27 +583,63 @@
       `).join('');
     }
 
+    function renderFamilyControls(config) {
+      const controls = config.familyControls || {};
+      $('family-controls').innerHTML = `
+        <div class="family-list">
+          ${Object.entries(controls).map(([family, control]) => `
+            <div class="family-panel" data-family-panel="${family}">
+              <h3>${control.label}</h3>
+              <div class="field">
+                <label for="${family}-voice">Voice</label>
+                <select id="${family}-voice" data-family-voice="${family}">
+                  ${control.voices.map((voice) => (
+                    `<option value="${voice.id}" ${voice.id === control.defaultVoice ? 'selected' : ''}>${voice.label} (${voice.gender})</option>`
+                  )).join('')}
+                </select>
+              </div>
+              ${control.threads ? `
+                <div class="field">
+                  <label for="${family}-threads">${control.threadLabel || 'Threads'}</label>
+                  <select id="${family}-threads" data-family-threads="${family}">
+                    ${control.threads.map((threads) => (
+                      `<option value="${threads.value}" ${threads.value === control.defaultThreads ? 'selected' : ''}>${threads.label}</option>`
+                    )).join('')}
+                  </select>
+                  ${control.threadNote ? `<div class="field-note">${control.threadNote}</div>` : ''}
+                </div>
+              ` : ''}
+              <div class="field">
+                <label for="${family}-speed">Speed <span data-family-speed-value="${family}">${Number(control.speed.default).toFixed(1)}x</span></label>
+                <input
+                  type="range"
+                  id="${family}-speed"
+                  data-family-speed="${family}"
+                  min="${control.speed.min}"
+                  max="${control.speed.max}"
+                  step="${control.speed.step}"
+                  value="${control.speed.default}"
+                >
+              </div>
+              ${family === 'kitten' ? `
+                <label class="inline-check">
+                  <input type="checkbox" data-family-clean="${family}" ${control.clean ? 'checked' : ''}>
+                  Clean text
+                </label>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
     function renderOptions(config) {
       renderModels(config.models);
-
-      const defaultVoice = config.defaultVoice || 'Bruno';
-      $('voice-select').innerHTML = config.voices.map((voice) => (
-        `<option value="${voice.id}" ${voice.id === defaultVoice ? 'selected' : ''}>${voice.label} (${voice.gender})</option>`
-      )).join('');
-
-      $('threads-select').innerHTML = config.threads.map((threads) => (
-        `<option value="${threads.value}" ${threads.value === '2' ? 'selected' : ''}>${threads.label}</option>`
-      )).join('');
+      renderFamilyControls(config);
 
       $('effect-select').innerHTML = EFFECT_PRESETS.map((effect) => (
         `<option value="${effect.id}" ${effect.id === DEFAULT_EFFECT ? 'selected' : ''}>${effect.label}</option>`
       )).join('');
-
-      $('speed-slider').min = config.speed.min;
-      $('speed-slider').max = config.speed.max;
-      $('speed-slider').step = config.speed.step;
-      $('speed-slider').value = config.speed.default;
-      $('speed-value').textContent = `${Number(config.speed.default).toFixed(1)}x`;
 
       $('message-select').innerHTML = [
         `<option value="custom">Custom</option>`,
@@ -585,19 +653,38 @@
 
     function applySettings(config) {
       const settings = state.settings || {};
-
-      setSelectValue('voice-select', settings.voice);
-      setSelectValue('threads-select', settings.threads);
       setSelectValue('effect-select', settings.effect);
+      const familySettings = settings.family || {};
 
-      if (Number.isFinite(settings.speed)) {
-        const speed = clamp(settings.speed, config.speed.min, config.speed.max);
-        $('speed-slider').value = speed;
-        $('speed-value').textContent = `${speed.toFixed(1)}x`;
-      }
+      for (const [family, control] of Object.entries(config.familyControls || {})) {
+        const saved = familySettings[family] || {};
+        const legacyVoice = family === 'kitten' ? settings.voice : null;
+        const legacySpeed = family === 'kitten' ? settings.speed : null;
+        const legacyThreads = family === 'kitten' ? settings.threads : null;
+        const legacyClean = family === 'kitten' ? settings.clean : null;
 
-      if (typeof settings.clean === 'boolean') {
-        $('clean-toggle').checked = settings.clean;
+        const voiceSelect = document.querySelector(`[data-family-voice="${family}"]`);
+        const threadSelect = document.querySelector(`[data-family-threads="${family}"]`);
+        const speedInput = document.querySelector(`[data-family-speed="${family}"]`);
+        const speedValue = document.querySelector(`[data-family-speed-value="${family}"]`);
+        const cleanInput = document.querySelector(`[data-family-clean="${family}"]`);
+
+        if (voiceSelect && (saved.voice || legacyVoice) && optionExists(voiceSelect, saved.voice || legacyVoice)) {
+          voiceSelect.value = saved.voice || legacyVoice;
+        }
+        if (threadSelect && (saved.threads || legacyThreads) && optionExists(threadSelect, saved.threads || legacyThreads)) {
+          threadSelect.value = saved.threads || legacyThreads;
+        }
+        const speed = Number.isFinite(saved.speed) ? saved.speed : legacySpeed;
+        if (speedInput && Number.isFinite(speed)) {
+          const nextSpeed = clamp(speed, control.speed.min, control.speed.max);
+          speedInput.value = nextSpeed;
+          if (speedValue) speedValue.textContent = `${nextSpeed.toFixed(1)}x`;
+        }
+        const clean = typeof saved.clean === 'boolean' ? saved.clean : legacyClean;
+        if (cleanInput && typeof clean === 'boolean') {
+          cleanInput.checked = clean;
+        }
       }
 
       if (settings.messageId && optionExists($('message-select'), settings.messageId)) {
@@ -626,6 +713,7 @@
             </div>
           </td>
           <td data-cell="status">${status}</td>
+          <td data-cell="threading">-</td>
           <td data-cell="load">-</td>
           <td data-cell="gen">-</td>
           <td data-cell="duration">-</td>
@@ -935,6 +1023,29 @@
       return payload;
     }
 
+    function getFamilyOptions(family) {
+      const speed = Number(document.querySelector(`[data-family-speed="${family}"]`)?.value);
+      return {
+        voice: document.querySelector(`[data-family-voice="${family}"]`)?.value,
+        speed: Number.isFinite(speed) ? speed : 1,
+        clean: document.querySelector(`[data-family-clean="${family}"]`)?.checked,
+        numThreads: document.querySelector(`[data-family-threads="${family}"]`)?.value,
+      };
+    }
+
+    function threadingLabel(model, result) {
+      const threading = result.model.threading;
+      if (threading?.supported) {
+        return threading.applied === 'auto' ? 'ORT auto' : `${threading.applied} intra`;
+      }
+      if (model.family === 'kokoro') {
+        if (model.backend === 'webgpu') return 'WebGPU';
+        if (model.backend === 'wasm') return 'WASM runtime';
+        return 'Node runtime';
+      }
+      return '-';
+    }
+
     function normalizedResult(model, samples, sampleRate, genTimeMs, loadMs, cached, extra = {}) {
       const stats = audioStats(samples);
       const audioDurationSec = samples.length / sampleRate;
@@ -976,7 +1087,7 @@
     }
 
     async function generateKokoroNode(model, common) {
-      const url = `/api/generate?text=${encodeURIComponent(common.text)}&voice=${encodeURIComponent(model.voice || 'am_adam')}&speed=${encodeURIComponent(common.speed)}`;
+      const url = `/api/generate?text=${encodeURIComponent(common.text)}&voice=${encodeURIComponent(common.voice || model.voice || 'am_adam')}&speed=${encodeURIComponent(common.speed)}`;
       const response = await fetch(url);
       const payload = await response.json();
       if (!response.ok || payload.error) {
@@ -1015,7 +1126,7 @@
       const loaded = await getKokoroBrowserModel(model);
       const start = performance.now();
       const audio = await loaded.model.generate(common.text, {
-        voice: model.voice || 'am_adam',
+        voice: common.voice || model.voice || 'am_adam',
         speed: common.speed,
       });
       const genTimeMs = performance.now() - start;
@@ -1055,15 +1166,12 @@
       state.audio.clear();
       const results = [];
 
-      const common = {
-        voice: $('voice-select').value,
-        text,
-        speed: Number($('speed-slider').value),
-        clean: $('clean-toggle').checked,
-        numThreads: $('threads-select').value,
-      };
-
       for (const model of models) {
+        const familyOptions = getFamilyOptions(model.family || 'kitten');
+        const common = {
+          ...familyOptions,
+          text,
+        };
         setCell(model.id, 'status', 'Loading', 'warn');
         setStatus(`Generating ${model.label}...`);
         try {
@@ -1073,9 +1181,10 @@
             samples,
             sampleRate: result.sampleRate,
             playbackGain: result.playbackGain || 1,
-            fileBase: `${model.family || 'kitten'}-${model.id}-${model.voice || common.voice}-${Date.now()}`,
+            fileBase: `${model.family || 'kitten'}-${model.id}-${common.voice || model.voice || 'voice'}-${Date.now()}`,
           });
           setCell(model.id, 'status', result.model.cached ? 'Cached' : 'Ready', 'good');
+          setCell(model.id, 'threading', threadingLabel(model, result));
           setCell(model.id, 'load', result.model.cached ? 'cached' : fmtMs(result.model.loadMs));
           setCell(model.id, 'gen', fmtMs(result.genTimeMs));
           setCell(model.id, 'duration', fmtDuration(result.audioDurationSec));
@@ -1122,11 +1231,6 @@
       }
     }
 
-    $('speed-slider').addEventListener('input', () => {
-      $('speed-value').textContent = `${Number($('speed-slider').value).toFixed(1)}x`;
-      saveSettings();
-    });
-
     $('message-select').addEventListener('change', () => {
       const id = $('message-select').value;
       if (id === 'custom') {
@@ -1144,10 +1248,17 @@
     });
 
     $('model-list').addEventListener('change', saveSettings);
-    $('voice-select').addEventListener('change', saveSettings);
-    $('threads-select').addEventListener('change', saveSettings);
+    $('family-controls').addEventListener('input', (event) => {
+      const speed = event.target.closest('[data-family-speed]');
+      if (speed) {
+        const family = speed.dataset.familySpeed;
+        const value = document.querySelector(`[data-family-speed-value="${family}"]`);
+        if (value) value.textContent = `${Number(speed.value).toFixed(1)}x`;
+      }
+      saveSettings();
+    });
+    $('family-controls').addEventListener('change', saveSettings);
     $('effect-select').addEventListener('change', saveSettings);
-    $('clean-toggle').addEventListener('change', saveSettings);
     $('run-btn').addEventListener('click', runBenchmark);
     $('clear-btn').addEventListener('click', clearResults);
     $('results-body').addEventListener('click', (event) => {

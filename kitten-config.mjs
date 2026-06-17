@@ -79,6 +79,14 @@ export const KITTEN_VOICES = [
   { id: 'Leo', label: 'Leo', gender: 'Male' },
 ];
 
+export const KOKORO_VOICES = [
+  { id: 'am_adam', label: 'Adam', gender: 'Male' },
+  { id: 'am_michael', label: 'Michael', gender: 'Male' },
+  { id: 'af_heart', label: 'Heart', gender: 'Female' },
+  { id: 'af_bella', label: 'Bella', gender: 'Female' },
+  { id: 'af_nova', label: 'Nova', gender: 'Female' },
+];
+
 export const KITTEN_THREAD_OPTIONS = [
   { value: '1', label: '1 thread' },
   { value: '2', label: '2 threads' },
@@ -91,6 +99,13 @@ export const KITTEN_SPEED = {
   max: 2,
   step: 0.1,
   default: 1,
+};
+
+export const KOKORO_SPEED = {
+  min: 0.5,
+  max: 2,
+  step: 0.1,
+  default: 1.3,
 };
 
 export function resolveKittenModel(value) {
