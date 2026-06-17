@@ -4,8 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SENTENCES, VOICES, SAMPLE_RATE } from './sentences.mjs';
 import {
+  KITTEN_DEFAULT_VOICE,
   KITTEN_DEFAULT_TEXT,
   KITTEN_MODELS,
+  KOKORO_MODELS,
   KITTEN_SAMPLE_RATE,
   KITTEN_SPEED,
   KITTEN_THREAD_OPTIONS,
@@ -15,6 +17,14 @@ import {
   resolveKittenModel,
   resolveKittenVoice,
 } from './kitten-config.mjs';
+import {
+  audioStats,
+  installKittenPythonCompat,
+  playbackGainForPeak,
+  prepareKittenNodeRuntime,
+  registerKittenModels,
+  withKittenCacheHome,
+} from './kitten-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -170,9 +180,8 @@ async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
   const loadPromise = (async () => {
     fs.mkdirSync(KITTEN_CACHE_DIR, { recursive: true });
     const { KittenTTS, MODELS } = await import('kitten-tts-js');
-    for (const model of KITTEN_MODELS) {
-      MODELS[model.modelId] ??= { label: model.label };
-    }
+    registerKittenModels(MODELS, KITTEN_MODELS);
+    installKittenPythonCompat(KittenTTS);
     await prepareKittenNodeRuntime();
     const options = {
       runtime: 'cpu',
@@ -183,7 +192,7 @@ async function getKittenModel(modelId = KITTEN_MODELS[0].id, numThreads = 2) {
     }
 
     const start = performance.now();
-    const model = await withKittenCacheHome(() => KittenTTS.from_pretrained(modelInfo.modelId, options));
+    const model = await withKittenCacheHome(__dirname, () => KittenTTS.from_pretrained(modelInfo.modelId, options));
     const loadMs = performance.now() - start;
     const voices = typeof model.list_voices === 'function'
       ? model.list_voices()
@@ -218,28 +227,6 @@ function audioDataToBase64(audioData) {
   return buf.toString('base64');
 }
 
-async function withKittenCacheHome(fn) {
-  const previousHome = process.env.HOME;
-  process.env.HOME = __dirname;
-  try {
-    return await fn();
-  } finally {
-    if (previousHome == null) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = previousHome;
-    }
-  }
-}
-
-async function prepareKittenNodeRuntime() {
-  const ort = await import('onnxruntime-node');
-  if (ort.env?.wasm) {
-    ort.env.trace = false;
-    ort.env.wasm = undefined;
-  }
-}
-
 async function handleKittenConfig(req, res) {
   if (req.method !== 'GET') {
     methodNotAllowed(res, 'GET');
@@ -247,12 +234,16 @@ async function handleKittenConfig(req, res) {
   }
 
   writeJson(res, 200, {
-    models: KITTEN_MODELS,
+    models: [
+      ...KITTEN_MODELS.map((model) => ({ ...model, family: 'kitten' })),
+      ...KOKORO_MODELS,
+    ],
     voices: KITTEN_VOICES,
     sampleRate: KITTEN_SAMPLE_RATE,
     speed: KITTEN_SPEED,
     threads: KITTEN_THREAD_OPTIONS,
     defaultText: KITTEN_DEFAULT_TEXT,
+    defaultVoice: KITTEN_DEFAULT_VOICE,
     messages: SENTENCES.map((sentence, index) => ({
       id: `${sentence.cascade}-${index + 1}`,
       ...sentence,
@@ -303,7 +294,8 @@ async function handleKittenGenerate(req, res) {
     const sampleRate = audio.sampling_rate || KITTEN_SAMPLE_RATE;
     const audioDurationSec = audio.duration || data.length / sampleRate;
     const rtf = audioDurationSec / (genTimeMs / 1000);
-    const rms = rmsEnergy(data);
+    const stats = audioStats(data);
+    const playbackGain = playbackGainForPeak(stats.peak);
 
     writeJson(res, 200, {
       model: publicKittenModel(entry, currentLoadMs, cacheHit),
@@ -317,7 +309,14 @@ async function handleKittenGenerate(req, res) {
       audioDurationSec: round(audioDurationSec, 3),
       genTimeMs: Math.round(genTimeMs),
       rtf: round(rtf, 2),
-      rms: round(rms, 6),
+      min: round(stats.min, 6),
+      max: round(stats.max, 6),
+      peak: round(stats.peak, 6),
+      rms: round(stats.rms, 6),
+      clipCount: stats.clipCount,
+      clipPercent: round(stats.clipPercent, 4),
+      nanCount: stats.nanCount,
+      playbackGain: round(playbackGain, 6),
     });
   } catch (e) {
     writeJson(res, 500, { error: e.message });

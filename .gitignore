@@ -4,6 +4,7 @@ output.wav
 results/
 samples/
 kokoro-cache/
+kokoro-bench-results/
 kokoro-results/
 kokoro-samples/
 kitten-results/

@@ -1,8 +1,16 @@
 export const KITTEN_SAMPLE_RATE = 24000;
 
 export const KITTEN_DEFAULT_TEXT = 'Corner 14, brake one beat earlier. You are losing time on entry.';
+export const KITTEN_DEFAULT_VOICE = 'Bruno';
 
 export const KITTEN_MODELS = [
+  {
+    id: 'mini',
+    modelId: 'KittenML/kitten-tts-mini-0.8',
+    label: 'Mini 80M',
+    size: '~80 MB',
+    role: 'Best quality reference',
+  },
   {
     id: 'micro',
     modelId: 'KittenML/kitten-tts-micro-0.8',
@@ -24,6 +32,39 @@ export const KITTEN_MODELS = [
     size: '~25 MB',
     role: 'Emergency low-end candidate',
     note: 'Upstream docs mention some reported issues with this int8 model.',
+  },
+];
+
+export const KOKORO_MODELS = [
+  {
+    id: 'kokoro-webgpu',
+    family: 'kokoro',
+    backend: 'webgpu',
+    modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX',
+    label: 'Kokoro 82M WebGPU',
+    size: '~330 MB',
+    role: 'GT Coach enhanced voice GPU path',
+    voice: 'am_adam',
+  },
+  {
+    id: 'kokoro-wasm',
+    family: 'kokoro',
+    backend: 'wasm',
+    modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX',
+    label: 'Kokoro 82M WASM',
+    size: '~330 MB',
+    role: 'GT Coach browser CPU reference',
+    voice: 'am_adam',
+  },
+  {
+    id: 'kokoro-node-cpu',
+    family: 'kokoro',
+    backend: 'node-cpu',
+    modelId: 'onnx-community/Kokoro-82M-v1.0-ONNX',
+    label: 'Kokoro 82M Node CPU',
+    size: '~330 MB',
+    role: 'GT Coach local server CPU path',
+    voice: 'am_adam',
   },
 ];
 
@@ -61,7 +102,7 @@ export function resolveKittenModel(value) {
 }
 
 export function resolveKittenVoice(value) {
-  const voice = value || 'Leo';
+  const voice = value || KITTEN_DEFAULT_VOICE;
   const found = KITTEN_VOICES.find((item) => item.id === voice);
   if (!found) {
     throw new Error(`Unsupported KittenTTS voice: ${voice}`);

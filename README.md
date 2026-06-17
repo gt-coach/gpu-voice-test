@@ -49,7 +49,7 @@ This will:
 
 ## KittenTTS Benchmark
 
-This branch includes a local benchmark for KittenTTS Micro 40M, Nano 15M fp32, and Nano 15M int8.
+This branch includes a local benchmark for KittenTTS Mini 80M, Micro 40M, Nano 15M fp32, Nano 15M int8, and the Kokoro 82M WebGPU/WASM/Node CPU paths used by the GT Coach WebGPU Voice Test.
 
 ```bash
 pnpm install
@@ -57,6 +57,7 @@ pnpm serve
 ```
 
 Open `http://localhost:3000/kitten-benchmark.html` to generate and compare playable samples.
+The Node path applies a small compatibility patch so text cleaning and voice style selection match the official Python KittenTTS implementation. The UI and saved WAV samples apply a small gain reduction only when raw output exceeds full scale; raw peak and clipping counts remain visible in the benchmark.
 
 For repeatable CLI results:
 

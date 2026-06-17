@@ -230,7 +230,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      min-width: 700px;
+      min-width: 900px;
     }
     th,
     td {
@@ -278,7 +278,7 @@
     <div class="top-bar">
       <div>
         <h1>KittenTTS Benchmark</h1>
-        <p>Local Node CPU comparison for Kitten Micro, Nano fp32, and Nano int8 using GT Coach messages.</p>
+        <p>Local Node CPU comparison for Kitten Mini, Micro, Nano fp32, and Nano int8 using GT Coach messages.</p>
       </div>
       <div class="actions">
         <button class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
@@ -304,6 +304,10 @@
               <label for="threads-select">Threads</label>
               <select id="threads-select"></select>
             </div>
+          </div>
+          <div class="field">
+            <label for="effect-select">Playback effect</label>
+            <select id="effect-select"></select>
           </div>
           <div class="field">
             <label for="speed-slider">Speed <span id="speed-value">1.0x</span></label>
@@ -349,6 +353,9 @@
                   <th>Audio</th>
                   <th>RTF</th>
                   <th>RMS</th>
+                  <th>Peak</th>
+                  <th>Clip</th>
+                  <th>Gain</th>
                 </tr>
               </thead>
               <tbody id="results-body"></tbody>
@@ -362,11 +369,61 @@
 
   <script type="module">
     const $ = (id) => document.getElementById(id);
+    const KOKORO_CDN = 'https://esm.sh/kokoro-js@1.2.1?deps=@huggingface/transformers@4.0.0-next.8';
+    const SETTINGS_KEY = 'gtCoach.kittenBenchmark.settings.v2';
+    const DEFAULT_EFFECT = 'race-engineer';
+    const EFFECT_PRESETS = [
+      { id: 'dry', label: 'Dry' },
+      {
+        id: 'race-engineer',
+        label: 'Race engineer',
+        highpass: 280,
+        lowpass: 3900,
+        presenceHz: 2100,
+        presenceDb: 3,
+        presenceQ: 0.9,
+        threshold: 0.18,
+        ratio: 3,
+        makeup: 1.35,
+        drive: 1.3,
+      },
+      {
+        id: 'helmet-intercom',
+        label: 'Helmet intercom',
+        highpass: 190,
+        lowpass: 5200,
+        presenceHz: 1700,
+        presenceDb: 2,
+        presenceQ: 0.8,
+        threshold: 0.16,
+        ratio: 2.4,
+        makeup: 1.25,
+        drive: 1.12,
+      },
+      {
+        id: 'pit-wall-radio',
+        label: 'Pit wall radio',
+        highpass: 320,
+        lowpass: 3200,
+        presenceHz: 2300,
+        presenceDb: 4,
+        presenceQ: 1.1,
+        threshold: 0.14,
+        ratio: 4,
+        makeup: 1.55,
+        drive: 1.65,
+        noise: 0.0009,
+        click: 0.018,
+      },
+    ];
     const state = {
       config: null,
       rows: new Map(),
       audio: new Map(),
       audioContext: null,
+      settings: loadSettings(),
+      kokoroModels: new Map(),
+      kokoroModule: null,
     };
 
     function setStatus(message, kind = 'info') {
@@ -380,6 +437,45 @@
       $('status-banner').textContent = '';
     }
 
+    function loadSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveSettings() {
+      if (!state.config) return;
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        models: [...document.querySelectorAll('[data-model-checkbox]')]
+          .filter((input) => input.checked)
+          .map((input) => input.value),
+        voice: $('voice-select').value,
+        threads: $('threads-select').value,
+        effect: $('effect-select').value,
+        speed: Number($('speed-slider').value),
+        clean: $('clean-toggle').checked,
+        messageId: $('message-select').value,
+        text: $('text-input').value,
+      }));
+    }
+
+    function optionExists(select, value) {
+      return [...select.options].some((option) => option.value === value);
+    }
+
+    function setSelectValue(id, value) {
+      const select = $(id);
+      if (value != null && optionExists(select, value)) {
+        select.value = value;
+      }
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
     function fmtMs(ms) {
       if (!Number.isFinite(ms)) return '-';
       return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -390,16 +486,60 @@
       return `${seconds.toFixed(2)}s`;
     }
 
+    function round(value, digits = 2) {
+      if (!Number.isFinite(value)) return value;
+      const multiplier = 10 ** digits;
+      return Math.round(value * multiplier) / multiplier;
+    }
+
+    function audioStats(samples) {
+      if (!samples.length) {
+        return { min: 0, max: 0, peak: 0, rms: 0, clipCount: 0, clipPercent: 0, nanCount: 0 };
+      }
+
+      let min = Infinity;
+      let max = -Infinity;
+      let sum = 0;
+      let clipCount = 0;
+      let nanCount = 0;
+
+      for (const sample of samples) {
+        if (!Number.isFinite(sample)) {
+          nanCount++;
+          continue;
+        }
+        min = Math.min(min, sample);
+        max = Math.max(max, sample);
+        sum += sample * sample;
+        if (Math.abs(sample) >= 1) clipCount++;
+      }
+
+      return {
+        min,
+        max,
+        peak: Math.max(Math.abs(min), Math.abs(max)),
+        rms: Math.sqrt(sum / samples.length),
+        clipCount,
+        clipPercent: (clipCount / samples.length) * 100,
+        nanCount,
+      };
+    }
+
+    function playbackGainForPeak(peak) {
+      return Number.isFinite(peak) && peak > 1 ? 0.98 / peak : 1;
+    }
+
     function selectedModels() {
       return [...document.querySelectorAll('[data-model-checkbox]:checked')]
-        .map((input) => state.config.models.find((model) => model.modelId === input.value))
+        .map((input) => state.config.models.find((model) => model.id === input.value))
         .filter(Boolean);
     }
 
     function renderModels(models) {
+      const savedModels = Array.isArray(state.settings.models) ? state.settings.models : null;
       $('model-list').innerHTML = models.map((model) => `
         <label class="model-choice">
-          <input type="checkbox" data-model-checkbox value="${model.modelId}" checked>
+          <input type="checkbox" data-model-checkbox value="${model.id}" ${!savedModels || savedModels.includes(model.id) || savedModels.includes(model.modelId) ? 'checked' : ''}>
           <span>
             <span class="model-title">
               <span>${model.label}</span>
@@ -414,12 +554,17 @@
     function renderOptions(config) {
       renderModels(config.models);
 
+      const defaultVoice = config.defaultVoice || 'Bruno';
       $('voice-select').innerHTML = config.voices.map((voice) => (
-        `<option value="${voice.id}" ${voice.id === 'Leo' ? 'selected' : ''}>${voice.label} (${voice.gender})</option>`
+        `<option value="${voice.id}" ${voice.id === defaultVoice ? 'selected' : ''}>${voice.label} (${voice.gender})</option>`
       )).join('');
 
       $('threads-select').innerHTML = config.threads.map((threads) => (
         `<option value="${threads.value}" ${threads.value === '2' ? 'selected' : ''}>${threads.label}</option>`
+      )).join('');
+
+      $('effect-select').innerHTML = EFFECT_PRESETS.map((effect) => (
+        `<option value="${effect.id}" ${effect.id === DEFAULT_EFFECT ? 'selected' : ''}>${effect.label}</option>`
       )).join('');
 
       $('speed-slider').min = config.speed.min;
@@ -435,6 +580,38 @@
         )),
       ].join('');
       $('text-input').value = config.defaultText;
+      applySettings(config);
+    }
+
+    function applySettings(config) {
+      const settings = state.settings || {};
+
+      setSelectValue('voice-select', settings.voice);
+      setSelectValue('threads-select', settings.threads);
+      setSelectValue('effect-select', settings.effect);
+
+      if (Number.isFinite(settings.speed)) {
+        const speed = clamp(settings.speed, config.speed.min, config.speed.max);
+        $('speed-slider').value = speed;
+        $('speed-value').textContent = `${speed.toFixed(1)}x`;
+      }
+
+      if (typeof settings.clean === 'boolean') {
+        $('clean-toggle').checked = settings.clean;
+      }
+
+      if (settings.messageId && optionExists($('message-select'), settings.messageId)) {
+        $('message-select').value = settings.messageId;
+      }
+
+      if ($('message-select').value === 'custom') {
+        if (typeof settings.text === 'string') {
+          $('text-input').value = settings.text;
+        }
+      } else {
+        const message = config.messages.find((item) => item.id === $('message-select').value);
+        $('text-input').value = message?.text || config.defaultText;
+      }
     }
 
     function rowTemplate(id, model, status = 'Queued') {
@@ -454,6 +631,9 @@
           <td data-cell="duration">-</td>
           <td data-cell="rtf">-</td>
           <td data-cell="rms">-</td>
+          <td data-cell="peak">-</td>
+          <td data-cell="clip">-</td>
+          <td data-cell="gain">-</td>
         </tr>
       `;
     }
@@ -488,6 +668,160 @@
         bytes[i] = binary.charCodeAt(i);
       }
       return new Float32Array(bytes.buffer);
+    }
+
+    function samplesWithGain(samples, gain) {
+      if (!Number.isFinite(gain) || gain === 1) return samples;
+      const scaled = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        scaled[i] = samples[i] * gain;
+      }
+      return scaled;
+    }
+
+    function currentEffectPreset() {
+      return EFFECT_PRESETS.find((effect) => effect.id === $('effect-select').value) || EFFECT_PRESETS[0];
+    }
+
+    function biquad(type, sampleRate, frequency, q = 0.707, gainDb = 0) {
+      frequency = clamp(frequency, 20, sampleRate / 2 - 100);
+      const w0 = (2 * Math.PI * frequency) / sampleRate;
+      const cos = Math.cos(w0);
+      const sin = Math.sin(w0);
+      const alpha = sin / (2 * q);
+      const a = 10 ** (gainDb / 40);
+      let b0;
+      let b1;
+      let b2;
+      let a0;
+      let a1;
+      let a2;
+
+      if (type === 'highpass') {
+        b0 = (1 + cos) / 2;
+        b1 = -(1 + cos);
+        b2 = (1 + cos) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cos;
+        a2 = 1 - alpha;
+      } else if (type === 'lowpass') {
+        b0 = (1 - cos) / 2;
+        b1 = 1 - cos;
+        b2 = (1 - cos) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cos;
+        a2 = 1 - alpha;
+      } else {
+        b0 = 1 + alpha * a;
+        b1 = -2 * cos;
+        b2 = 1 - alpha * a;
+        a0 = 1 + alpha / a;
+        a1 = -2 * cos;
+        a2 = 1 - alpha / a;
+      }
+
+      return {
+        b0: b0 / a0,
+        b1: b1 / a0,
+        b2: b2 / a0,
+        a1: a1 / a0,
+        a2: a2 / a0,
+      };
+    }
+
+    function applyBiquad(samples, coeffs) {
+      const out = new Float32Array(samples.length);
+      let x1 = 0;
+      let x2 = 0;
+      let y1 = 0;
+      let y2 = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const x0 = samples[i];
+        const y0 = coeffs.b0 * x0 + coeffs.b1 * x1 + coeffs.b2 * x2 - coeffs.a1 * y1 - coeffs.a2 * y2;
+        out[i] = y0;
+        x2 = x1;
+        x1 = x0;
+        y2 = y1;
+        y1 = y0;
+      }
+      return out;
+    }
+
+    function compress(samples, threshold, ratio, makeup) {
+      const out = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i];
+        const sign = Math.sign(sample);
+        const abs = Math.abs(sample);
+        const compressed = abs <= threshold ? abs : threshold + ((abs - threshold) / ratio);
+        out[i] = sign * compressed * makeup;
+      }
+      return out;
+    }
+
+    function saturate(samples, drive) {
+      if (!drive || drive === 1) return samples;
+      const out = new Float32Array(samples.length);
+      const norm = Math.tanh(drive);
+      for (let i = 0; i < samples.length; i++) {
+        out[i] = Math.tanh(samples[i] * drive) / norm;
+      }
+      return out;
+    }
+
+    function randomGenerator(seed) {
+      let state = seed >>> 0;
+      return () => {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        return (state / 0x80000000) - 1;
+      };
+    }
+
+    function addRadioTexture(samples, sampleRate, noise = 0, click = 0) {
+      if (!noise && !click) return samples;
+      const out = new Float32Array(samples);
+      const random = randomGenerator(samples.length + Math.round(sampleRate));
+
+      if (noise) {
+        for (let i = 0; i < out.length; i++) {
+          out[i] += random() * noise;
+        }
+      }
+
+      if (click) {
+        const clickLen = Math.min(Math.floor(sampleRate * 0.045), Math.floor(out.length / 2));
+        for (let i = 0; i < clickLen; i++) {
+          const env = (1 - (i / clickLen)) ** 2;
+          out[i] += random() * click * env;
+          out[out.length - 1 - i] += random() * click * env;
+        }
+      }
+
+      return out;
+    }
+
+    function limitPeak(samples, ceiling = 0.98) {
+      let peak = 0;
+      for (const sample of samples) {
+        peak = Math.max(peak, Math.abs(sample));
+      }
+      if (peak <= ceiling) return samples;
+      return samplesWithGain(samples, ceiling / peak);
+    }
+
+    function processPlaybackSamples(item) {
+      const preset = currentEffectPreset();
+      let samples = samplesWithGain(item.samples, item.playbackGain);
+      if (preset.id === 'dry') return samples;
+
+      samples = applyBiquad(samples, biquad('highpass', item.sampleRate, preset.highpass));
+      samples = applyBiquad(samples, biquad('lowpass', item.sampleRate, preset.lowpass));
+      samples = applyBiquad(samples, biquad('peaking', item.sampleRate, preset.presenceHz, preset.presenceQ, preset.presenceDb));
+      samples = compress(samples, preset.threshold, preset.ratio, preset.makeup);
+      samples = saturate(samples, preset.drive);
+      samples = applyBiquad(samples, biquad('lowpass', item.sampleRate, preset.lowpass));
+      samples = addRadioTexture(samples, item.sampleRate, preset.noise, preset.click);
+      return limitPeak(samples);
     }
 
     function encodeWav(samples, sampleRate) {
@@ -532,8 +866,9 @@
       if (state.audioContext.state === 'suspended') {
         await state.audioContext.resume();
       }
-      const audioBuffer = state.audioContext.createBuffer(1, item.samples.length, item.sampleRate);
-      audioBuffer.copyToChannel(item.samples, 0);
+      const playbackSamples = processPlaybackSamples(item);
+      const audioBuffer = state.audioContext.createBuffer(1, playbackSamples.length, item.sampleRate);
+      audioBuffer.copyToChannel(playbackSamples, 0);
       const source = state.audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(state.audioContext.destination);
@@ -543,12 +878,13 @@
     function downloadAudio(id) {
       const item = state.audio.get(id);
       if (!item) return;
-      const wav = encodeWav(item.samples, item.sampleRate);
+      const effect = currentEffectPreset();
+      const wav = encodeWav(processPlaybackSamples(item), item.sampleRate);
       const blob = new Blob([wav], { type: 'audio/wav' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${item.fileBase}.wav`;
+      link.download = `${item.fileBase}-${effect.id}.wav`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -599,6 +935,103 @@
       return payload;
     }
 
+    function normalizedResult(model, samples, sampleRate, genTimeMs, loadMs, cached, extra = {}) {
+      const stats = audioStats(samples);
+      const audioDurationSec = samples.length / sampleRate;
+      const rtf = audioDurationSec / (genTimeMs / 1000);
+
+      return {
+        model: {
+          id: model.id,
+          modelId: model.modelId,
+          label: model.label,
+          cached,
+          loadMs,
+        },
+        sampleRate,
+        samples: samples.length,
+        audioDurationSec: round(audioDurationSec, 3),
+        genTimeMs: Math.round(genTimeMs),
+        rtf: round(rtf, 2),
+        min: round(stats.min, 6),
+        max: round(stats.max, 6),
+        peak: round(stats.peak, 6),
+        rms: round(stats.rms, 6),
+        clipCount: stats.clipCount,
+        clipPercent: round(stats.clipPercent, 4),
+        nanCount: stats.nanCount,
+        playbackGain: round(playbackGainForPeak(stats.peak), 6),
+        browserSamples: samples,
+        ...extra,
+      };
+    }
+
+    async function generateKitten(model, common) {
+      const result = await postJson('/api/kitten/generate', {
+        ...common,
+        modelId: model.modelId,
+      });
+      result.browserSamples = decodeFloat32(result.audio);
+      return result;
+    }
+
+    async function generateKokoroNode(model, common) {
+      const url = `/api/generate?text=${encodeURIComponent(common.text)}&voice=${encodeURIComponent(model.voice || 'am_adam')}&speed=${encodeURIComponent(common.speed)}`;
+      const response = await fetch(url);
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const samples = decodeFloat32(payload.audio);
+      return normalizedResult(model, samples, 24000, payload.genTimeMs, 0, true, {
+        model: {
+          id: model.id,
+          modelId: model.modelId,
+          label: model.label,
+          cached: true,
+          loadMs: 0,
+        },
+      });
+    }
+
+    async function getKokoroBrowserModel(model) {
+      const key = `${model.modelId}:${model.backend}`;
+      if (state.kokoroModels.has(key)) {
+        return { model: state.kokoroModels.get(key), loadMs: 0, cached: true };
+      }
+
+      state.kokoroModule ??= await import(KOKORO_CDN);
+      const start = performance.now();
+      const kokoro = await state.kokoroModule.KokoroTTS.from_pretrained(model.modelId, {
+        dtype: 'fp32',
+        device: model.backend,
+      });
+      const loadMs = performance.now() - start;
+      state.kokoroModels.set(key, kokoro);
+      return { model: kokoro, loadMs, cached: false };
+    }
+
+    async function generateKokoroBrowser(model, common) {
+      const loaded = await getKokoroBrowserModel(model);
+      const start = performance.now();
+      const audio = await loaded.model.generate(common.text, {
+        voice: model.voice || 'am_adam',
+        speed: common.speed,
+      });
+      const genTimeMs = performance.now() - start;
+      return normalizedResult(model, audio.audio, 24000, genTimeMs, loaded.loadMs, loaded.cached);
+    }
+
+    async function generateModel(model, common) {
+      if (model.family === 'kokoro' && model.backend === 'node-cpu') {
+        return generateKokoroNode(model, common);
+      }
+      if (model.family === 'kokoro') {
+        return generateKokoroBrowser(model, common);
+      }
+      return generateKitten(model, common);
+    }
+
     async function runBenchmark() {
       const models = selectedModels();
       if (models.length === 0) {
@@ -634,15 +1067,13 @@
         setCell(model.id, 'status', 'Loading', 'warn');
         setStatus(`Generating ${model.label}...`);
         try {
-          const result = await postJson('/api/kitten/generate', {
-            ...common,
-            modelId: model.modelId,
-          });
-          const samples = decodeFloat32(result.audio);
+          const result = await generateModel(model, common);
+          const samples = result.browserSamples;
           state.audio.set(model.id, {
             samples,
             sampleRate: result.sampleRate,
-            fileBase: `kitten-${model.id}-${common.voice}-${Date.now()}`,
+            playbackGain: result.playbackGain || 1,
+            fileBase: `${model.family || 'kitten'}-${model.id}-${model.voice || common.voice}-${Date.now()}`,
           });
           setCell(model.id, 'status', result.model.cached ? 'Cached' : 'Ready', 'good');
           setCell(model.id, 'load', result.model.cached ? 'cached' : fmtMs(result.model.loadMs));
@@ -650,6 +1081,9 @@
           setCell(model.id, 'duration', fmtDuration(result.audioDurationSec));
           setCell(model.id, 'rtf', `${result.rtf.toFixed(2)}x`, rtfClass(result.rtf));
           setCell(model.id, 'rms', result.rms.toFixed(6));
+          setCell(model.id, 'peak', result.peak.toFixed(6), result.peak >= 1 ? 'bad' : '');
+          setCell(model.id, 'clip', String(result.clipCount), result.clipCount > 0 || result.nanCount > 0 ? 'bad' : 'good');
+          setCell(model.id, 'gain', `${(result.playbackGain || 1).toFixed(3)}x`, result.playbackGain < 1 ? 'warn' : '');
           setActionsEnabled(model.id, true);
           results.push(result);
         } catch (error) {
@@ -690,19 +1124,30 @@
 
     $('speed-slider').addEventListener('input', () => {
       $('speed-value').textContent = `${Number($('speed-slider').value).toFixed(1)}x`;
+      saveSettings();
     });
 
     $('message-select').addEventListener('change', () => {
       const id = $('message-select').value;
-      if (id === 'custom') return;
+      if (id === 'custom') {
+        saveSettings();
+        return;
+      }
       const message = state.config?.messages.find((item) => item.id === id);
       if (message) $('text-input').value = message.text;
+      saveSettings();
     });
 
     $('text-input').addEventListener('input', () => {
       $('message-select').value = 'custom';
+      saveSettings();
     });
 
+    $('model-list').addEventListener('change', saveSettings);
+    $('voice-select').addEventListener('change', saveSettings);
+    $('threads-select').addEventListener('change', saveSettings);
+    $('effect-select').addEventListener('change', saveSettings);
+    $('clean-toggle').addEventListener('change', saveSettings);
     $('run-btn').addEventListener('click', runBenchmark);
     $('clear-btn').addEventListener('click', clearResults);
     $('results-body').addEventListener('click', (event) => {

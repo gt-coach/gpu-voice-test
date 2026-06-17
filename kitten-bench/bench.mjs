@@ -2,16 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { KittenTTS, MODELS as KITTEN_JS_MODELS } from 'kitten-tts-js';
+import { KittenTTS, MODELS as KITTEN_JS_MODELS, encodeWav } from 'kitten-tts-js';
 import { SENTENCES } from '../sentences.mjs';
 import {
   KITTEN_MODELS,
   KITTEN_SAMPLE_RATE,
+  KITTEN_DEFAULT_VOICE,
   clampKittenSpeed,
   normalizeKittenThreads,
   resolveKittenModel,
   resolveKittenVoice,
 } from '../kitten-config.mjs';
+import {
+  audioStats,
+  applyGain,
+  installKittenPythonCompat,
+  playbackGainForPeak,
+  prepareKittenNodeRuntime,
+  registerKittenModels,
+  withKittenCacheHome,
+} from '../kitten-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -44,34 +54,6 @@ function round(value, digits = 2) {
   return Math.round(value * multiplier) / multiplier;
 }
 
-function rmsEnergy(audio) {
-  let sum = 0;
-  for (let i = 0; i < audio.length; i++) sum += audio[i] * audio[i];
-  return Math.sqrt(sum / audio.length);
-}
-
-async function withKittenCacheHome(fn) {
-  const previousHome = process.env.HOME;
-  process.env.HOME = rootDir;
-  try {
-    return await fn();
-  } finally {
-    if (previousHome == null) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = previousHome;
-    }
-  }
-}
-
-async function prepareKittenNodeRuntime() {
-  const ort = await import('onnxruntime-node');
-  if (ort.env?.wasm) {
-    ort.env.trace = false;
-    ort.env.wasm = undefined;
-  }
-}
-
 function csvEscape(value) {
   const text = String(value ?? '');
   if (!/[",\n]/.test(text)) return text;
@@ -89,6 +71,11 @@ function writeCsv(filePath, rows) {
     'audioDurationSec',
     'rtf',
     'rms',
+    'peak',
+    'clipCount',
+    'clipPercent',
+    'nanCount',
+    'playbackGain',
     'samples',
     'samplePath',
     'error',
@@ -117,13 +104,15 @@ function summarize(rows) {
       avgAudioDurationSec: round(avg(modelRows.map((row) => row.audioDurationSec)), 3),
       avgRtf: round(avg(modelRows.map((row) => row.rtf)), 2),
       avgRms: round(avg(modelRows.map((row) => row.rms)), 6),
+      avgPeak: round(avg(modelRows.map((row) => row.peak)), 6),
+      clippedSamples: modelRows.reduce((sum, row) => sum + row.clipCount, 0),
     }];
   }));
 }
 
 const opts = {
-  models: listArg('models', 'micro,nano-fp32,nano-int8'),
-  voices: listArg('voices', 'Leo,Jasper'),
+  models: listArg('models', 'mini,micro,nano-fp32,nano-int8'),
+  voices: listArg('voices', `${KITTEN_DEFAULT_VOICE},Leo,Jasper`),
   tiers: new Set(listArg('tiers', 'cue,compact,full')),
   speed: clampKittenSpeed(arg('speed', '1')),
   clean: boolArg('clean', true),
@@ -142,9 +131,8 @@ const messages = SENTENCES
   .filter((sentence) => opts.tiers.has(sentence.cascade))
   .slice(0, opts.limit > 0 ? opts.limit : undefined);
 
-for (const model of KITTEN_MODELS) {
-  KITTEN_JS_MODELS[model.modelId] ??= { label: model.label };
-}
+registerKittenModels(KITTEN_JS_MODELS, KITTEN_MODELS);
+installKittenPythonCompat(KittenTTS);
 
 if (messages.length === 0) {
   throw new Error('No benchmark messages selected');
@@ -168,7 +156,7 @@ for (const modelInfo of models) {
 
   const loadStart = performance.now();
   await prepareKittenNodeRuntime();
-  const model = await withKittenCacheHome(() => KittenTTS.from_pretrained(modelInfo.modelId, modelOptions));
+  const model = await withKittenCacheHome(rootDir, () => KittenTTS.from_pretrained(modelInfo.modelId, modelOptions));
   const loadMs = performance.now() - loadStart;
   console.log(`Loaded in ${Math.round(loadMs)}ms`);
 
@@ -196,12 +184,19 @@ for (const modelInfo of models) {
         const sampleRate = audio.sampling_rate || KITTEN_SAMPLE_RATE;
         const audioDurationSec = audio.duration || data.length / sampleRate;
         const rtf = audioDurationSec / (genTimeMs / 1000);
+        const stats = audioStats(data);
+        const playbackGain = playbackGainForPeak(stats.peak);
 
         Object.assign(row, {
           genTimeMs: Math.round(genTimeMs),
           audioDurationSec: round(audioDurationSec, 3),
           rtf: round(rtf, 2),
-          rms: round(rmsEnergy(data), 6),
+          rms: round(stats.rms, 6),
+          peak: round(stats.peak, 6),
+          clipCount: stats.clipCount,
+          clipPercent: round(stats.clipPercent, 4),
+          nanCount: stats.nanCount,
+          playbackGain: round(playbackGain, 6),
           samples: data.length,
           samplePath: '',
           error: '',
@@ -210,7 +205,8 @@ for (const modelInfo of models) {
         if (opts.saveSamples && sampleCount < opts.maxSamples) {
           const filename = `${timestamp}-${modelInfo.id}-${voice}-${message.cascade}-${sampleCount + 1}.wav`;
           const filePath = path.join(opts.samplesDir, filename);
-          await audio.save(filePath);
+          const playbackData = applyGain(data, playbackGain);
+          fs.writeFileSync(filePath, Buffer.from(encodeWav(playbackData, sampleRate)));
           row.samplePath = path.relative(rootDir, filePath);
           sampleCount++;
         }
