@@ -490,6 +490,13 @@
     // ── Constants ──────────────────────────────────────────────────
     const SAMPLE_RATE = 24000;
     const KITTEN_WPM_MODEL_ID = 'nano-fp32';
+    // Stamped into the export: calibrated speeds are only valid for the model they were
+    // measured on. Kitten's nano configs carry per-voice speed_priors (0.8, and 0.9 for
+    // Hugo) that silently scale the speed axis; mini and micro ship none.
+    const MODEL_IDS = {
+      kokoro: 'onnx-community/Kokoro-82M-v1.0-ONNX',
+      kitten: 'KittenML/kitten-tts-nano-0.8-fp32',
+    };
     const KOKORO_VOICES = [
       { id: 'af_heart', label: 'Heart (Female)' },
       { id: 'af_bella', label: 'Bella (Female)' },
@@ -919,8 +926,12 @@
       $('cal-detail-tbody').appendChild(tr);
     }
 
-    function renderExport(target) {
-      const lines = ['export const VOICE_SPEEDS = {'];
+    function renderExport({ target, tolerance, mode, sentences }) {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const header = [
+        `// Calibrated ${stamp} \u00b7 target ${target} WPM \u00b1${tolerance} \u00b7 ${mode} (${sentences} sentences)`,
+      ];
+      const lines = [];
       let any = false;
 
       for (const section of [kokoroSection, kittenSection]) {
@@ -930,6 +941,11 @@
         if (!entries.length) continue;
         any = true;
 
+        header.push(`// ${section.family}: ${MODEL_IDS[section.family]}`);
+        if (section.family === 'kitten') {
+          header.push('//   speed_priors {0.8, 0.9} are baked into these numbers.');
+          header.push('//   mini/micro ship none \u2014 these speeds run ~25% fast there.');
+        }
         lines.push(`  ${section.family}: {`);
         for (const [v, c] of entries) {
           const key = /^[a-z_$][\w$]*$/i.test(v.id) ? v.id : `'${v.id}'`;
@@ -951,7 +967,7 @@
       lines.push('};');
 
       if (!any) return;
-      $('export-code').textContent = lines.join('\n');
+      $('export-code').textContent = [...header, 'export const VOICE_SPEEDS = {', ...lines].join('\n');
       $('export-card').classList.remove('hidden');
     }
 
@@ -1020,7 +1036,7 @@
           s.setProgress(100);
           s.setStatus(`Calibrated to ${d.target} WPM.`);
         }
-        renderExport(d.target);
+        renderExport(d);
         finish();
       });
 

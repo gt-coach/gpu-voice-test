@@ -101,6 +101,38 @@ export function installKittenNodeThreadedLoader(KittenTTS, { downloadModel, load
   Object.defineProperty(KittenTTS, marker, { value: true });
 }
 
+// The preprocessor's number regex is /(?<![a-zA-Z])-?[\d,]+(?:\.\d+)?/g. The comma sits
+// in the character class to catch thousands separators like "1,000", but it also eats the
+// comma in "Corner 14, brake earlier" — which loses its pause (3.89s spoken, vs 4.42s
+// with the comma). Worse, `[\d,]+` matches a *lone* comma too, and parseInt('') is NaN,
+// so number_to_words returns '' and the comma disappears entirely. A bare "earlier,"
+// only survives because the (?<![a-zA-Z]) lookbehind sees the preceding letter.
+//
+// So we can't just detach the comma with a space — that exposes it to the same deletion.
+// Swap it for a letters-only sentinel that the number pass can't match and the
+// punctuation pass won't strip, then swap it back before phonemization.
+//
+// The sentinel is space-padded: glued directly to a following digit ("14<S>11") its
+// trailing letter would trip the (?<![a-zA-Z]) lookbehind and leave that number
+// unexpanded. The padding is undone when the comma is re-attached.
+//
+// Known limitation, inherited from the library: "Corner 14,111" (no space) still reads
+// as one number, fourteen thousand one hundred eleven.
+const COMMA_SENTINEL = 'zzcommazz';
+
+export function protectCommasFromNumberExpansion(text) {
+  return text.replace(/(\d),(?!\d{3}(?!\d))/g, `$1 ${COMMA_SENTINEL} `);
+}
+
+export function restoreProtectedCommas(text) {
+  return text.replaceAll(COMMA_SENTINEL, ',').replace(/\s+([,.;:!?])/g, '$1');
+}
+
+export function preprocessKittenText(preprocessor, text) {
+  const protectedText = protectCommasFromNumberExpansion(String(text ?? ''));
+  return restoreProtectedCommas(preprocessor.process(protectedText));
+}
+
 export function installKittenPythonCompat(KittenTTS) {
   const marker = Symbol.for('gtCoach.kittenTtsPythonCompat');
   if (KittenTTS.prototype[marker]) return;
@@ -113,13 +145,13 @@ export function installKittenPythonCompat(KittenTTS) {
       return originalGenerate.call(this, text, opts);
     }
 
-    const processedText = this._preprocessor.process(String(text ?? ''));
+    const processedText = preprocessKittenText(this._preprocessor, text);
     return originalGenerate.call(this, processedText, { ...opts, clean: false });
   };
 
   KittenTTS.prototype._prepareInputs = async function prepareInputsWithPythonStyleRef(chunk, voiceName, speed, clean) {
     const prepared = await originalPrepareInputs.call(this, chunk, voiceName, speed, clean);
-    const processedText = clean ? this._preprocessor.process(chunk) : chunk;
+    const processedText = clean ? preprocessKittenText(this._preprocessor, chunk) : chunk;
     const resolvedVoice = this.voiceAliases?.[voiceName] ?? voiceName;
     const voiceEntry = this._voices?.[resolvedVoice];
 
