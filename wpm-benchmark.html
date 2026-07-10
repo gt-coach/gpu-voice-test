@@ -211,7 +211,7 @@
     <div class="top-bar">
       <div class="top-bar-left">
         <h1>Voice WPM Calibration</h1>
-        <p>Measures speaking rate for each Kokoro voice across cue, compact, and full coaching messages.</p>
+        <p>Measures speaking rate for each Kokoro and KittenTTS voice across cue, compact, and full coaching messages.</p>
       </div>
       <div class="top-bar-right">
         <button class="btn btn-primary" id="run-btn">Run Benchmark</button>
@@ -264,6 +264,43 @@
       </table>
     </div>
 
+    <!-- Speed slider — KittenTTS -->
+    <div class="card" style="margin-top: 24px;">
+      <h2>KittenTTS Speed</h2>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <input type="range" id="kitten-speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
+          style="flex: 1; accent-color: #6366f1;">
+        <span id="kitten-speed-value" style="font-size: 20px; font-weight: 700; color: #fff; min-width: 50px; text-align: right;">1.0x</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-top: 4px;">
+        <span>0.5x (slow)</span>
+        <span>1.0x (default)</span>
+        <span>2.0x (fast)</span>
+      </div>
+    </div>
+
+    <div class="progress-row" id="kitten-progress-row">
+      <div class="progress-track"><div class="progress-fill" id="kitten-progress-fill"></div></div>
+      <span class="progress-label" id="kitten-status">—</span>
+    </div>
+
+    <!-- KittenTTS WPM results table -->
+    <div class="card">
+      <h2>KittenTTS — Words Per Minute</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Voice</th>
+            <th>Cue</th>
+            <th>Compact</th>
+            <th>Full</th>
+            <th>Overall</th>
+          </tr>
+        </thead>
+        <tbody id="kitten-wpm-tbody"></tbody>
+      </table>
+    </div>
+
     <!-- Per-sentence detail -->
     <div class="card">
       <button class="detail-toggle" id="detail-toggle">Show per-sentence detail</button>
@@ -271,6 +308,7 @@
         <table>
           <thead>
             <tr>
+              <th>Model</th>
               <th>Voice</th>
               <th>Cascade</th>
               <th>Sentence</th>
@@ -329,7 +367,7 @@
     </div>
 
     <div class="footer">
-      <span>kokoro-js 1.2.1 &middot; CPU inference via onnxruntime-node</span><br>
+      <span>kokoro-js 1.2.1 &middot; kitten-tts-js (nano 0.8 fp32) &middot; CPU inference via onnxruntime-node</span><br>
       <span>WPM = (word count / audio duration) &times; 60</span>
     </div>
   </div>
@@ -339,20 +377,25 @@
 
     // ── Constants ──────────────────────────────────────────────────
     const SAMPLE_RATE = 24000;
-    const VOICES = [
+    const KITTEN_WPM_MODEL_ID = 'nano-fp32';
+    const KOKORO_VOICES = [
       { id: 'af_heart', label: 'Heart (Female)' },
       { id: 'af_bella', label: 'Bella (Female)' },
       { id: 'af_nova', label: 'Nova (Female)' },
       { id: 'am_adam', label: 'Adam (Male)' },
       { id: 'am_michael', label: 'Michael (Male)' },
     ];
+    const KITTEN_VOICES = [
+      { id: 'Bella', label: 'Bella (Female)' },
+      { id: 'Jasper', label: 'Jasper (Male)' },
+      { id: 'Luna', label: 'Luna (Female)' },
+      { id: 'Bruno', label: 'Bruno (Male)' },
+      { id: 'Rosie', label: 'Rosie (Female)' },
+      { id: 'Hugo', label: 'Hugo (Male)' },
+      { id: 'Kiki', label: 'Kiki (Female)' },
+      { id: 'Leo', label: 'Leo (Male)' },
+    ];
     const CASCADES = ['cue', 'compact', 'full'];
-
-    // ── State ─────────────────────────────────────────────────────
-    const voiceRows = {};       // voice id -> { cue, compact, full, overall } TDs
-    const voicePlayBtns = {};   // voice id -> { cue, compact, full } buttons
-    const sampleTexts = {};     // cascade -> first sentence text (set during benchmark)
-    const allResults = [];
 
     // ── Audio playback ───────────────────────────────────────────
     function playAudio(float32) {
@@ -365,90 +408,157 @@
       src.start();
     }
 
-    async function fetchAndPlay(voiceId, cascade, btn) {
-      const text = sampleTexts[cascade];
-      if (!text) return;
+    function decodeAudio(base64) {
+      const raw = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+      return new Float32Array(raw.buffer);
+    }
+
+    async function fetchKokoroAudio(voiceId, text) {
       const speed = parseFloat($('speed-slider').value);
-      btn.disabled = true;
-      btn.classList.add('loading');
-      btn.textContent = '...';
-      try {
-        const res = await fetch(`/api/generate?text=${encodeURIComponent(text)}&voice=${voiceId}&speed=${speed}`);
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        const raw = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-        playAudio(new Float32Array(raw.buffer));
-      } catch (e) {
-        console.error('Play failed:', e);
-      }
-      btn.disabled = false;
-      btn.classList.remove('loading');
-      btn.textContent = '\u25B6';
+      const res = await fetch(`/api/generate?text=${encodeURIComponent(text)}&voice=${voiceId}&speed=${speed}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return decodeAudio(data.audio);
     }
 
-    // ── Init empty table rows ─────────────────────────────────────
-    const tbody = $('wpm-tbody');
-    for (const v of VOICES) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${v.label}</td>`;
-      voiceRows[v.id] = {};
-      voicePlayBtns[v.id] = {};
-      for (const c of CASCADES) {
-        const td = document.createElement('td');
-        td.className = 'val muted';
-        td.textContent = '—';
-        const btn = document.createElement('button');
-        btn.className = 'play-btn hidden';
+    async function fetchKittenAudio(voiceId, text) {
+      const speed = parseFloat($('kitten-speed-slider').value);
+      const res = await fetch('/api/kitten/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: voiceId, speed, modelId: KITTEN_WPM_MODEL_ID }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return decodeAudio(data.audio);
+    }
+
+    // ── WPM section ─────────────────────────────────
+    // Owns one voice table plus its progress row. Kokoro and Kitten each get one.
+    function createWpmSection({ voices, tbodyId, statusId, progressFillId, fetchAudio }) {
+      const voiceRows = {};       // voice id -> { cue, compact, full, overall } TDs
+      const voicePlayBtns = {};   // voice id -> { cue, compact, full } buttons
+      const sampleTexts = {};     // cascade -> first sentence text (set during benchmark)
+      const results = [];
+
+      async function play(voiceId, cascade, btn) {
+        const text = sampleTexts[cascade];
+        if (!text) return;
+        btn.disabled = true;
+        btn.classList.add('loading');
+        btn.textContent = '...';
+        try {
+          playAudio(await fetchAudio(voiceId, text));
+        } catch (e) {
+          console.error('Play failed:', e);
+        }
+        btn.disabled = false;
+        btn.classList.remove('loading');
         btn.textContent = '\u25B6';
-        btn.addEventListener('click', () => fetchAndPlay(v.id, c, btn));
-        td.appendChild(btn);
-        tr.appendChild(td);
-        voiceRows[v.id][c] = td;
-        voicePlayBtns[v.id][c] = btn;
       }
-      const overallTd = document.createElement('td');
-      overallTd.className = 'val muted';
-      overallTd.textContent = '—';
-      tr.appendChild(overallTd);
-      voiceRows[v.id].overall = overallTd;
-      tbody.appendChild(tr);
-    }
 
-    // ── Helpers ───────────────────────────────────────────────────
-    function setStatus(text) { $('status').textContent = text; }
-    function setProgress(pct) { $('progress-fill').style.width = pct + '%'; }
+      const tbody = $(tbodyId);
+      for (const v of voices) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${v.label}</td>`;
+        voiceRows[v.id] = {};
+        voicePlayBtns[v.id] = {};
+        for (const c of CASCADES) {
+          const td = document.createElement('td');
+          td.className = 'val muted';
+          td.textContent = '—';
+          const btn = document.createElement('button');
+          btn.className = 'play-btn hidden';
+          btn.textContent = '\u25B6';
+          btn.addEventListener('click', () => play(v.id, c, btn));
+          td.appendChild(btn);
+          tr.appendChild(td);
+          voiceRows[v.id][c] = td;
+          voicePlayBtns[v.id][c] = btn;
+        }
+        const overallTd = document.createElement('td');
+        overallTd.className = 'val muted';
+        overallTd.textContent = '—';
+        tr.appendChild(overallTd);
+        voiceRows[v.id].overall = overallTd;
+        tbody.appendChild(tr);
+      }
 
-    function updateVoiceCells(voiceId) {
-      const rows = voiceRows[voiceId];
-      const btns = voicePlayBtns[voiceId];
-      const voiceResults = allResults.filter(r => r.voice === voiceId);
+      function updateVoiceCells(voiceId) {
+        const rows = voiceRows[voiceId];
+        const btns = voicePlayBtns[voiceId];
+        const voiceResults = results.filter(r => r.voice === voiceId);
 
-      for (const cascade of CASCADES) {
-        const cResults = voiceResults.filter(r => r.cascade === cascade);
-        if (cResults.length) {
-          const avg = cResults.reduce((s, r) => s + r.wpm, 0) / cResults.length;
-          // Keep play button reference before overwriting
-          const btn = btns[cascade];
-          rows[cascade].textContent = avg.toFixed(1);
-          rows[cascade].className = 'val';
-          rows[cascade].appendChild(btn);
-          btn.classList.remove('hidden');
-          // Store first sentence as sample
-          if (!sampleTexts[cascade]) sampleTexts[cascade] = cResults[0].text;
+        for (const cascade of CASCADES) {
+          const cResults = voiceResults.filter(r => r.cascade === cascade);
+          if (cResults.length) {
+            const avg = cResults.reduce((s, r) => s + r.wpm, 0) / cResults.length;
+            // Keep play button reference before overwriting
+            const btn = btns[cascade];
+            rows[cascade].textContent = avg.toFixed(1);
+            rows[cascade].className = 'val';
+            rows[cascade].appendChild(btn);
+            btn.classList.remove('hidden');
+            // Store first sentence as sample
+            if (!sampleTexts[cascade]) sampleTexts[cascade] = cResults[0].text;
+          }
+        }
+
+        if (voiceResults.length) {
+          const avg = voiceResults.reduce((s, r) => s + r.wpm, 0) / voiceResults.length;
+          rows.overall.textContent = avg.toFixed(1);
+          rows.overall.className = 'val highlight';
         }
       }
 
-      if (voiceResults.length) {
-        const avg = voiceResults.reduce((s, r) => s + r.wpm, 0) / voiceResults.length;
-        rows.overall.textContent = avg.toFixed(1);
-        rows.overall.className = 'val highlight';
-      }
+      return {
+        results,
+        setStatus: (text) => { $(statusId).textContent = text; },
+        setProgress: (pct) => { $(progressFillId).style.width = pct + '%'; },
+        applyResult(r) {
+          results.push(r);
+          updateVoiceCells(r.voice);
+          addDetailRow(r);
+        },
+        reset() {
+          results.length = 0;
+          for (const k of Object.keys(sampleTexts)) delete sampleTexts[k];
+          for (const [voiceId, rows] of Object.entries(voiceRows)) {
+            for (const c of CASCADES) {
+              rows[c].textContent = '—';
+              rows[c].className = 'val muted';
+              const btn = voicePlayBtns[voiceId][c];
+              btn.classList.add('hidden');
+              rows[c].appendChild(btn);
+            }
+            rows.overall.textContent = '—';
+            rows.overall.className = 'val muted';
+          }
+        },
+      };
     }
+
+    const kokoroSection = createWpmSection({
+      voices: KOKORO_VOICES,
+      tbodyId: 'wpm-tbody',
+      statusId: 'status',
+      progressFillId: 'progress-fill',
+      fetchAudio: fetchKokoroAudio,
+    });
+
+    const kittenSection = createWpmSection({
+      voices: KITTEN_VOICES,
+      tbodyId: 'kitten-wpm-tbody',
+      statusId: 'kitten-status',
+      progressFillId: 'kitten-progress-fill',
+      fetchAudio: fetchKittenAudio,
+    });
 
     function addDetailRow(r) {
       const tr = document.createElement('tr');
       const shortText = r.text.length > 60 ? r.text.slice(0, 57) + '...' : r.text;
       tr.innerHTML = `
+        <td>${r.model}</td>
         <td>${r.voiceLabel}</td>
         <td>${r.cascade}</td>
         <td title="${r.text}">${shortText}</td>
@@ -496,75 +606,77 @@
       $('summary-card').classList.remove('hidden');
     }
 
-    // ── Run benchmark via SSE ─────────────────────────────────────
+    // ── Run one model's benchmark over SSE ────────────────────
+    function runSection(section, url, onSummary) {
+      return new Promise((resolve, reject) => {
+        const eventSource = new EventSource(url);
+        let settled = false;
+
+        eventSource.addEventListener('progress', (e) => {
+          const data = JSON.parse(e.data);
+          section.setStatus(data.status);
+          if (data.total > 0) section.setProgress(Math.round((data.done / data.total) * 100));
+        });
+
+        eventSource.addEventListener('result', (e) => {
+          section.applyResult(JSON.parse(e.data));
+        });
+
+        eventSource.addEventListener('summary', (e) => {
+          if (onSummary) onSummary(JSON.parse(e.data));
+        });
+
+        eventSource.addEventListener('done', () => {
+          settled = true;
+          eventSource.close();
+          section.setStatus(`Done. ${section.results.length} samples.`);
+          section.setProgress(100);
+          resolve();
+        });
+
+        eventSource.addEventListener('error', (e) => {
+          if (settled) return;
+          settled = true;
+          eventSource.close();
+          reject(new Error(e.data
+            ? JSON.parse(e.data).message
+            : 'Connection error. Is the server running? (pnpm serve)'));
+        });
+      });
+    }
+
     async function runBenchmark() {
-      $('run-btn').disabled = true;
-      $('run-btn').textContent = 'Running...';
-      $('progress-row').classList.add('visible');
+      const btn = $('run-btn');
+      btn.disabled = true;
       $('error-banner').classList.remove('visible');
       $('summary-card').classList.add('hidden');
       $('detail-tbody').innerHTML = '';
-      allResults.length = 0;
-      for (const k of Object.keys(sampleTexts)) delete sampleTexts[k];
+      kokoroSection.reset();
+      kittenSection.reset();
+      $('progress-row').classList.add('visible');
+      $('kitten-progress-row').classList.add('visible');
+      kokoroSection.setStatus('Connecting to server...');
+      kokoroSection.setProgress(0);
+      kittenSection.setStatus('Waiting for Kokoro...');
+      kittenSection.setProgress(0);
 
-      // Reset cells and re-attach hidden play buttons
-      for (const [voiceId, rows] of Object.entries(voiceRows)) {
-        for (const c of CASCADES) {
-          rows[c].textContent = '—';
-          rows[c].className = 'val muted';
-          const btn = voicePlayBtns[voiceId][c];
-          btn.classList.add('hidden');
-          rows[c].appendChild(btn);
-        }
-        rows.overall.textContent = '—';
-        rows.overall.className = 'val muted';
-      }
+      try {
+        btn.textContent = 'Running Kokoro...';
+        const kokoroSpeed = parseFloat($('speed-slider').value);
+        await runSection(kokoroSection, `/api/wpm?speed=${kokoroSpeed}`, renderSummary);
 
-      setStatus('Connecting to server...');
-      setProgress(0);
+        btn.textContent = 'Running Kitten...';
+        const kittenSpeed = parseFloat($('kitten-speed-slider').value);
+        await runSection(kittenSection, `/api/kitten/wpm?speed=${kittenSpeed}`);
 
-      const speed = parseFloat($('speed-slider').value);
-      const eventSource = new EventSource(`/api/wpm?speed=${speed}`);
-
-      eventSource.addEventListener('progress', (e) => {
-        const data = JSON.parse(e.data);
-        setStatus(data.status);
-        if (data.total > 0) setProgress(Math.round((data.done / data.total) * 100));
-      });
-
-      eventSource.addEventListener('result', (e) => {
-        const r = JSON.parse(e.data);
-        allResults.push(r);
-        updateVoiceCells(r.voice);
-        addDetailRow(r);
-      });
-
-      eventSource.addEventListener('summary', (e) => {
-        const summary = JSON.parse(e.data);
-        renderSummary(summary);
-      });
-
-      eventSource.addEventListener('done', () => {
-        eventSource.close();
-        setStatus(`Done. ${allResults.length} samples.`);
-        setProgress(100);
-        $('run-btn').disabled = false;
-        $('run-btn').textContent = 'Run Again';
-      });
-
-      eventSource.addEventListener('error', (e) => {
-        if (e.data) {
-          const data = JSON.parse(e.data);
-          $('error-banner').textContent = 'Error: ' + data.message;
-        } else {
-          $('error-banner').textContent = 'Connection error. Is the server running? (pnpm serve)';
-        }
+        btn.textContent = 'Run Again';
+      } catch (e) {
+        $('error-banner').textContent = 'Error: ' + e.message;
         $('error-banner').classList.add('visible');
-        eventSource.close();
-        $('run-btn').disabled = false;
-        $('run-btn').textContent = 'Run Benchmark';
-        $('progress-row').classList.remove('visible');
-      });
+        btn.textContent = 'Run Benchmark';
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -712,9 +824,9 @@
     }
 
     function updateSpeedComparison() {
-      if (!allResults.length || !wsResults.length) return;
+      if (!kokoroSection.results.length || !wsResults.length) return;
 
-      const kokoroOverall = allResults.reduce((s, r) => s + r.wpm, 0) / allResults.length;
+      const kokoroOverall = kokoroSection.results.reduce((s, r) => s + r.wpm, 0) / kokoroSection.results.length;
       const wsOverall = wsResults.reduce((s, r) => s + r.wpm, 0) / wsResults.length;
       const kokoroSpeed = parseFloat($('speed-slider').value);
       const wsRate = parseFloat($('ws-speed-slider').value);
@@ -729,7 +841,7 @@
 
       // Per-cascade breakdown
       for (const c of CASCADES) {
-        const kRes = allResults.filter(r => r.cascade === c);
+        const kRes = kokoroSection.results.filter(r => r.cascade === c);
         const wRes = wsResults.filter(r => r.cascade === c);
         if (kRes.length && wRes.length) {
           const kAvg = kRes.reduce((s, r) => s + r.wpm, 0) / kRes.length;

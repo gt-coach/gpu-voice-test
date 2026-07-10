@@ -41,6 +41,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const KITTEN_CACHE_DIR = path.join(__dirname, '.cache', 'kitten-tts');
 const SUPERTONIC_CACHE_DIR = path.join(__dirname, '.cache', 'supertonic-3');
+const KITTEN_WPM_MODEL_ID = 'nano-fp32';
 const kittenModelCache = new Map();
 const kittenModelLoads = new Map();
 const supertonicModelCache = new Map();
@@ -104,6 +105,39 @@ function round(value, digits = 2) {
   if (!Number.isFinite(value)) return value;
   const multiplier = 10 ** digits;
   return Math.round(value * multiplier) / multiplier;
+}
+
+function buildWpmSummary(results) {
+  const avg = (arr) => parseFloat((arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1));
+
+  const byVoice = {};
+  const byCascade = {};
+
+  for (const r of results) {
+    if (!byVoice[r.voice]) byVoice[r.voice] = { label: r.voiceLabel, wpms: [] };
+    byVoice[r.voice].wpms.push(r.wpm);
+
+    if (!byCascade[r.cascade]) byCascade[r.cascade] = [];
+    byCascade[r.cascade].push(r.wpm);
+  }
+
+  return {
+    byVoice: Object.fromEntries(
+      Object.entries(byVoice).map(([id, v]) => {
+        const voiceResults = results.filter((r) => r.voice === id);
+        const cascades = {};
+        for (const cascade of ['cue', 'compact', 'full']) {
+          const cResults = voiceResults.filter((r) => r.cascade === cascade);
+          if (cResults.length) cascades[cascade] = avg(cResults.map((r) => r.wpm));
+        }
+        return [id, { label: v.label, overall: avg(v.wpms), ...cascades }];
+      }),
+    ),
+    byCascade: Object.fromEntries(
+      Object.entries(byCascade).map(([c, wpms]) => [c, avg(wpms)]),
+    ),
+    overall: avg(results.map((r) => r.wpm)),
+  };
 }
 
 function writeJson(res, statusCode, payload) {
@@ -591,6 +625,7 @@ async function handleWpm(req, res) {
         const wpm = (sentence.wordCount / audioDurationSec) * 60;
 
         const entry = {
+          model: 'kokoro',
           voice: voice.id,
           voiceLabel: voice.label,
           text: sentence.text,
@@ -606,39 +641,81 @@ async function handleWpm(req, res) {
       }
     }
 
-    // ── Compute summary ───────────────────────────────────────────
-    const byVoice = {};
-    const byCascade = {};
+    send('summary', buildWpmSummary(results));
+    send('done', { total: results.length });
+  } catch (e) {
+    send('error', { message: e.message });
+  }
 
-    for (const r of results) {
-      if (!byVoice[r.voice]) byVoice[r.voice] = { label: r.voiceLabel, wpms: [] };
-      byVoice[r.voice].wpms.push(r.wpm);
+  res.end();
+}
 
-      if (!byCascade[r.cascade]) byCascade[r.cascade] = [];
-      byCascade[r.cascade].push(r.wpm);
+// ── API: KittenTTS WPM benchmark (SSE) ──────────────────────────────
+async function handleKittenWpm(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const speed = clampKittenSpeed(url.searchParams.get('speed'));
+  const threads = normalizeKittenThreads(url.searchParams.get('numThreads') || 'auto');
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  function send(event, data) {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+
+  try {
+    send('progress', { status: 'Loading Kitten nano fp32...', done: 0, total: 0 });
+    const { entry } = await getKittenModel(KITTEN_WPM_MODEL_ID, threads);
+
+    send('progress', { status: `Speed: ${speed.toFixed(1)}x`, done: 0, total: 0 });
+
+    const total = KITTEN_VOICES.length * SENTENCES.length;
+    let done = 0;
+    const results = [];
+
+    for (const voice of KITTEN_VOICES) {
+      const voiceLabel = `${voice.label} (${voice.gender})`;
+
+      send('progress', { status: `Warming up ${voiceLabel}...`, done, total });
+      await entry.model.generate('test', { voice: voice.id, speed, clean: true });
+
+      for (const sentence of SENTENCES) {
+        if (req.destroyed) return; // Client disconnected
+
+        send('progress', {
+          status: `${voiceLabel}: "${sentence.text.slice(0, 40)}..."`,
+          done,
+          total,
+        });
+
+        const audio = await entry.model.generate(sentence.text, { voice: voice.id, speed, clean: true });
+        const data = audio.data instanceof Float32Array ? audio.data : new Float32Array(audio.data);
+        const sampleRate = audio.sampling_rate || KITTEN_SAMPLE_RATE;
+        const audioDurationSec = audio.duration || data.length / sampleRate;
+        const wpm = (sentence.wordCount / audioDurationSec) * 60;
+
+        const result = {
+          model: 'kitten',
+          voice: voice.id,
+          voiceLabel,
+          text: sentence.text,
+          cascade: sentence.cascade,
+          wordCount: sentence.wordCount,
+          audioDurationSec: parseFloat(audioDurationSec.toFixed(3)),
+          wpm: parseFloat(wpm.toFixed(1)),
+        };
+
+        results.push(result);
+        done++;
+        send('result', result);
+      }
     }
 
-    const avg = (arr) => parseFloat((arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1));
-
-    const summary = {
-      byVoice: Object.fromEntries(
-        Object.entries(byVoice).map(([id, v]) => {
-          const voiceResults = results.filter((r) => r.voice === id);
-          const cascades = {};
-          for (const cascade of ['cue', 'compact', 'full']) {
-            const cResults = voiceResults.filter((r) => r.cascade === cascade);
-            if (cResults.length) cascades[cascade] = avg(cResults.map((r) => r.wpm));
-          }
-          return [id, { label: v.label, overall: avg(v.wpms), ...cascades }];
-        }),
-      ),
-      byCascade: Object.fromEntries(
-        Object.entries(byCascade).map(([c, wpms]) => [c, avg(wpms)]),
-      ),
-      overall: avg(results.map((r) => r.wpm)),
-    };
-
-    send('summary', summary);
+    send('summary', buildWpmSummary(results));
     send('done', { total: results.length });
   } catch (e) {
     send('error', { message: e.message });
@@ -690,6 +767,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/kitten/config') return handleKittenConfig(req, res);
   if (url.pathname === '/api/kitten/load') return handleKittenLoad(req, res);
   if (url.pathname === '/api/kitten/generate') return handleKittenGenerate(req, res);
+  if (url.pathname === '/api/kitten/wpm') return handleKittenWpm(req, res);
   if (url.pathname === '/api/supertonic/generate') return handleSupertonicGenerate(req, res);
   if (url.pathname === '/api/generate') return handleGenerate(req, res);
   if (url.pathname === '/api/wpm') return handleWpm(req, res);
