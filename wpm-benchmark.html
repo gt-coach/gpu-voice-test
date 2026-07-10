@@ -509,6 +509,11 @@
     ];
     const CASCADES = ['cue', 'compact', 'full'];
 
+    // Previewed when you play a calibrated row. A 'full' coaching message: long enough
+    // that the pacing is audible, and it carries the least padding overhead, so what
+    // you hear is close to the calibrated rate rather than dominated by silence.
+    const PREVIEW_TEXT = 'Corner 14, brake one beat earlier — the brake release shifted late at Corner 12, and by Corner 15 your apex speed is too high.';
+
     // ── Audio playback ───────────────────────────────────────────
     function playAudio(float32) {
       const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
@@ -552,25 +557,33 @@
       const calibrated = {};      // voice id -> { speed, wpm, status }
       const results = [];
 
-      // Once a voice is calibrated, its play button previews the calibrated speed —
-      // that's the speed you'd actually ship, so it's the one worth hearing.
-      const speedFor = (voiceId) =>
-        calibrated[voiceId]?.speed ?? parseFloat($(speedSliderId).value);
-
-      async function play(voiceId, cascade, btn) {
-        const text = sampleTexts[cascade];
-        if (!text) return;
+      async function withPlayButton(btn, run) {
         btn.disabled = true;
         btn.classList.add('loading');
         btn.textContent = '...';
         try {
-          playAudio(await fetchAudio(voiceId, text, speedFor(voiceId)));
+          playAudio(await run());
         } catch (e) {
           console.error('Play failed:', e);
         }
         btn.disabled = false;
         btn.classList.remove('loading');
-        btn.textContent = '\u25B6';
+        btn.textContent = '▶';
+      }
+
+      function playPreview(voiceId, btn) {
+        const cal = calibrated[voiceId];
+        if (!cal) return;
+        return withPlayButton(btn, () => fetchAudio(voiceId, PREVIEW_TEXT, cal.speed));
+      }
+
+      // Each button plays the speed its own column was measured at: the cascade
+      // buttons the slider speed, the Speed-cell button the calibrated speed.
+      function play(voiceId, cascade, btn) {
+        const text = sampleTexts[cascade];
+        if (!text) return;
+        const speed = parseFloat($(speedSliderId).value);
+        return withPlayButton(btn, () => fetchAudio(voiceId, text, speed));
       }
 
       const tbody = $(tbodyId);
@@ -605,6 +618,16 @@
           tr.appendChild(td);
           voiceRows[v.id][key] = td;
         }
+
+        // Preview lives in the Speed cell so it works after a bare Calibrate run —
+        // the cascade play buttons need a benchmark first to capture their sample text.
+        const preview = document.createElement('button');
+        preview.className = 'play-btn hidden';
+        preview.textContent = '▶';
+        preview.title = `Preview ${v.label} at its calibrated speed`;
+        preview.addEventListener('click', () => playPreview(v.id, preview));
+        voiceRows[v.id].speed.appendChild(preview);
+        voiceRows[v.id].previewBtn = preview;
 
         const recal = document.createElement('button');
         recal.className = 'recal-btn';
@@ -657,6 +680,8 @@
           const rows = voiceRows[voiceId];
           rows.speed.textContent = formatSpeed(speed);
           rows.speed.className = 'val speed-cell';
+          rows.speed.appendChild(rows.previewBtn);   // textContent above dropped it
+          rows.previewBtn.classList.remove('hidden');
           rows.calWpm.textContent = wpm.toFixed(1);
           rows.calWpm.className = 'val';
 
@@ -685,6 +710,8 @@
               rows[key].className = 'val muted';
               rows[key].title = '';
             }
+            rows.previewBtn.classList.add('hidden');
+            rows.speed.appendChild(rows.previewBtn);
             rows.status.appendChild(rows.recalBtn);
           }
         },
