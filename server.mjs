@@ -18,7 +18,11 @@ import {
   KITTEN_SPEED,
   KITTEN_THREAD_OPTIONS,
   KITTEN_VOICES,
+  WPM_TARGET,
   clampKittenSpeed,
+  clampKokoroSpeed,
+  clampSpeedFor,
+  speedLimitsFor,
   clampSupertonicSpeed,
   clampSupertonicSteps,
   normalizeKittenThreads,
@@ -107,36 +111,44 @@ function round(value, digits = 2) {
   return Math.round(value * multiplier) / multiplier;
 }
 
+// Word-weighted speaking rate: total words / total audio seconds. Averaging the
+// per-sentence WPMs instead would over-weight short cues, whose rate is dragged
+// down by fixed lead-in/trailing silence.
+function wordWeightedWpm(results) {
+  if (!results.length) return 0;
+  const words = results.reduce((s, r) => s + r.wordCount, 0);
+  const seconds = results.reduce((s, r) => s + r.audioDurationSec, 0);
+  if (!seconds) return 0;
+  return parseFloat(((words / seconds) * 60).toFixed(1));
+}
+
 function buildWpmSummary(results) {
-  const avg = (arr) => parseFloat((arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1));
-
-  const byVoice = {};
-  const byCascade = {};
-
-  for (const r of results) {
-    if (!byVoice[r.voice]) byVoice[r.voice] = { label: r.voiceLabel, wpms: [] };
-    byVoice[r.voice].wpms.push(r.wpm);
-
-    if (!byCascade[r.cascade]) byCascade[r.cascade] = [];
-    byCascade[r.cascade].push(r.wpm);
-  }
+  const voiceIds = [...new Set(results.map((r) => r.voice))];
+  const cascades = ['cue', 'compact', 'full'];
 
   return {
     byVoice: Object.fromEntries(
-      Object.entries(byVoice).map(([id, v]) => {
+      voiceIds.map((id) => {
         const voiceResults = results.filter((r) => r.voice === id);
-        const cascades = {};
-        for (const cascade of ['cue', 'compact', 'full']) {
+        const perCascade = {};
+        for (const cascade of cascades) {
           const cResults = voiceResults.filter((r) => r.cascade === cascade);
-          if (cResults.length) cascades[cascade] = avg(cResults.map((r) => r.wpm));
+          if (cResults.length) perCascade[cascade] = wordWeightedWpm(cResults);
         }
-        return [id, { label: v.label, overall: avg(v.wpms), ...cascades }];
+        return [id, {
+          label: voiceResults[0].voiceLabel,
+          overall: wordWeightedWpm(voiceResults),
+          ...perCascade,
+        }];
       }),
     ),
     byCascade: Object.fromEntries(
-      Object.entries(byCascade).map(([c, wpms]) => [c, avg(wpms)]),
+      cascades
+        .map((c) => [c, results.filter((r) => r.cascade === c)])
+        .filter(([, rs]) => rs.length)
+        .map(([c, rs]) => [c, wordWeightedWpm(rs)]),
     ),
-    overall: avg(results.map((r) => r.wpm)),
+    overall: wordWeightedWpm(results),
   };
 }
 
@@ -540,7 +552,7 @@ async function handleGenerate(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const text = url.searchParams.get('text');
   const voice = url.searchParams.get('voice') || 'am_adam';
-  const speed = Math.max(0.5, Math.min(2.0, parseFloat(url.searchParams.get('speed') || '1')));
+  const speed = clampKokoroSpeed(url.searchParams.get('speed') || '1');
 
   if (!text) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -584,7 +596,7 @@ async function handleGenerate(req, res) {
 // ── API: WPM benchmark (SSE) ────────────────────────────────────────
 async function handleWpm(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const speed = Math.max(0.5, Math.min(2.0, parseFloat(url.searchParams.get('speed') || '1')));
+  const speed = clampKokoroSpeed(url.searchParams.get('speed') || '1');
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -724,6 +736,208 @@ async function handleKittenWpm(req, res) {
   res.end();
 }
 
+// ── Speed calibration ───────────────────────────────────────────────
+// Both models are deterministic: the same (voice, speed, text) always yields the
+// same duration. So WPM is a stable function of speed and a root-find converges
+// rather than chasing noise; no repeat-and-average is needed.
+
+const CALIBRATION_VOICES = {
+  kokoro: VOICES.map((v) => ({ id: v.id, label: v.label })),
+  kitten: KITTEN_VOICES.map((v) => ({ id: v.id, label: `${v.label} (${v.gender})` })),
+};
+
+// Quick mode: two sentences per cascade. Faster to iterate on, but a different
+// word mix than the full set, so it solves for a slightly different "170".
+function calibrationSentences(mode) {
+  if (mode !== 'quick') return SENTENCES;
+  return ['cue', 'compact', 'full'].flatMap(
+    (cascade) => SENTENCES.filter((s) => s.cascade === cascade).slice(0, 2),
+  );
+}
+
+// 3 decimals, not 2. Achievable WPM is a step function of speed (the duration
+// predictor rounds phoneme lengths to whole frames), and the steps are coarse:
+// Kokoro Bella jumps 167.8 -> 183.6 WPM between 1.32x and 1.34x. At 2 decimals the
+// solution at 1.325x (169.6) is simply not representable.
+function round3(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+async function generateDurationSec(family, voiceId, text, speed) {
+  if (family === 'kokoro') {
+    const m = await getModel();
+    const result = await m.generate(text, { voice: voiceId, speed });
+    return result.audio.length / SAMPLE_RATE;
+  }
+
+  const { entry } = await getKittenModel(KITTEN_WPM_MODEL_ID, 'auto');
+  const audio = await entry.model.generate(text, { voice: voiceId, speed, clean: true });
+  const data = audio.data instanceof Float32Array ? audio.data : new Float32Array(audio.data);
+  return audio.duration || data.length / (audio.sampling_rate || KITTEN_SAMPLE_RATE);
+}
+
+async function measureVoiceWpm(family, voiceId, speed, sentences) {
+  let words = 0;
+  let seconds = 0;
+  for (const sentence of sentences) {
+    seconds += await generateDurationSec(family, voiceId, sentence.text, speed);
+    words += sentence.wordCount;
+  }
+  return parseFloat(((words / seconds) * 60).toFixed(1));
+}
+
+// Before the target is bracketed: proportional, then secant. WPM rises with speed
+// roughly, though not exactly — Kokoro falls ~9% short of proportional at 2.0x.
+function unbracketedGuess(points, target) {
+  const b = points[points.length - 1];
+  if (points.length === 1) return b.speed * (target / b.wpm);
+
+  const a = points[points.length - 2];
+  if (Math.abs(b.wpm - a.wpm) < 1e-6) return b.speed * (target / b.wpm);
+  return b.speed + ((target - b.wpm) * (b.speed - a.speed)) / (b.wpm - a.wpm);
+}
+
+// Once bracketed, false position (Illinois): interpolate *inside* the bracket rather
+// than halving it. Plain bisection would leap to the useless midpoint of a wide
+// bracket — Leo, bracketed by [1.0, 1.803], wasted a pass at 1.402x measuring 129 WPM.
+// The Illinois halving of the retained endpoint stops the one-sided stalling that
+// plain regula falsi suffers on this convex curve.
+async function calibrateVoice(family, voice, options, onPass, isAborted) {
+  const { target, tolerance, maxPasses, sentences } = options;
+  const limits = speedLimitsFor(family);
+  const points = [];
+
+  let a = null;  // { speed, f } with f < 0
+  let b = null;  // { speed, f } with f > 0  (also the most recent point once bracketed)
+  let speed = round3(clampSpeedFor(family, 1));
+  let status = 'max-passes';
+
+  for (let pass = 1; pass <= maxPasses; pass++) {
+    if (isAborted()) return null;
+
+    const wpm = await measureVoiceWpm(family, voice.id, speed, sentences);
+    const f = wpm - target;
+    points.push({ speed, wpm });
+    onPass({ pass, speed, wpm, delta: parseFloat(f.toFixed(1)) });
+
+    if (Math.abs(f) <= tolerance) {
+      status = 'ok';
+      break;
+    }
+
+    if (a && b) {
+      // Illinois update: the new point always becomes b; a only moves when the
+      // bracket flips, otherwise a's weight is halved to pull the next guess across.
+      if (f * b.f < 0) a = b;
+      else a = { ...a, f: a.f / 2 };
+      b = { speed, f };
+    } else if (f < 0) {
+      a = { speed, f };
+    } else {
+      b = { speed, f };
+    }
+
+    const raw = a && b
+      ? (a.speed * b.f - b.speed * a.f) / (b.f - a.f)
+      : unbracketedGuess(points, target);
+    const next = round3(clampSpeedFor(family, raw));
+
+    // Repeating a speed we already measured means we can't move: either the clamp is
+    // binding, or the bracket has collapsed onto a single step of the WPM staircase
+    // that straddles the target — in which case no speed reaches it, and the closest
+    // point is the true answer rather than a failure to search hard enough.
+    if (points.some((p) => p.speed === next)) {
+      if (next <= limits.min || next >= limits.max) status = 'clamped';
+      else if (a && b && Math.abs(b.speed - a.speed) <= 0.002) status = 'quantized';
+      else status = 'max-passes';
+      break;
+    }
+    speed = next;
+  }
+
+  const best = points.reduce((x, y) => (Math.abs(y.wpm - target) < Math.abs(x.wpm - target) ? y : x));
+  return { ...best, status, passes: points };
+}
+
+async function handleCalibrate(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const target = Math.max(30, Math.min(400, parseFloat(url.searchParams.get('target') || String(WPM_TARGET))));
+  const tolerance = Math.max(0.1, Math.min(20, parseFloat(url.searchParams.get('tolerance') || '1')));
+  const maxPasses = Math.max(1, Math.min(12, parseInt(url.searchParams.get('maxPasses') || '9', 10)));
+  const scope = url.searchParams.get('scope') || 'both';
+  const mode = url.searchParams.get('mode') || 'full';
+  const voiceFilter = url.searchParams.get('voices');
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  const isAborted = () => req.destroyed;
+
+  try {
+    const sentences = calibrationSentences(mode);
+    const families = scope === 'both' ? ['kokoro', 'kitten'] : [scope];
+    const wanted = voiceFilter ? new Set(voiceFilter.split(',')) : null;
+
+    const jobs = families.flatMap((family) =>
+      CALIBRATION_VOICES[family]
+        .filter((voice) => !wanted || wanted.has(voice.id))
+        .map((voice) => ({ family, voice })),
+    );
+
+    if (!jobs.length) throw new Error('No voices matched the requested scope');
+
+    send('progress', {
+      status: `Calibrating ${jobs.length} voices to ${target} WPM (${sentences.length} sentences each)`,
+      done: 0,
+      total: jobs.length,
+    });
+
+    const speeds = { kokoro: {}, kitten: {} };
+    let done = 0;
+
+    for (const { family, voice } of jobs) {
+      if (isAborted()) return;
+
+      const onPass = (pass) => {
+        send('pass', { model: family, voice: voice.id, voiceLabel: voice.label, maxPasses, ...pass });
+        send('progress', {
+          status: `${voice.label} · pass ${pass.pass}/${maxPasses} · ${pass.speed}x → ${pass.wpm.toFixed(1)} WPM`,
+          done,
+          total: jobs.length,
+          model: family,
+        });
+      };
+
+      const result = await calibrateVoice(family, voice, { target, tolerance, maxPasses, sentences }, onPass, isAborted);
+      if (!result) return; // client disconnected mid-search
+
+      done++;
+      speeds[family][voice.id] = { speed: result.speed, wpm: result.wpm, status: result.status };
+      send('voice', {
+        model: family,
+        voice: voice.id,
+        voiceLabel: voice.label,
+        speed: result.speed,
+        wpm: result.wpm,
+        status: result.status,
+        passCount: result.passes.length,
+      });
+      send('progress', { status: `${voice.label} → ${result.speed}x`, done, total: jobs.length, model: family });
+    }
+
+    send('done', { target, tolerance, mode, sentences: sentences.length, speeds });
+  } catch (e) {
+    send('error', { message: e.message });
+  }
+
+  res.end();
+}
+
 // ── Static file server ──────────────────────────────────────────────
 function serveStatic(pathname, res) {
   const safePath = pathname === '/' ? '/index.html' : decodeURIComponent(pathname);
@@ -768,6 +982,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/kitten/load') return handleKittenLoad(req, res);
   if (url.pathname === '/api/kitten/generate') return handleKittenGenerate(req, res);
   if (url.pathname === '/api/kitten/wpm') return handleKittenWpm(req, res);
+  if (url.pathname === '/api/calibrate') return handleCalibrate(req, res);
   if (url.pathname === '/api/supertonic/generate') return handleSupertonicGenerate(req, res);
   if (url.pathname === '/api/generate') return handleGenerate(req, res);
   if (url.pathname === '/api/wpm') return handleWpm(req, res);

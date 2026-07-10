@@ -47,6 +47,7 @@
     .btn:hover:not(:disabled) { opacity: 0.85; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-primary { background: #6366f1; color: #fff; }
+    .btn-secondary { background: #2a2d3a; color: #e1e4ea; }
 
     /* Progress */
     .progress-row {
@@ -189,6 +190,60 @@
     }
     .footer a { color: #6366f1; text-decoration: none; }
 
+    .status-ok { color: #4ade80; font-weight: 600; }
+    .status-near { color: #60a5fa; font-weight: 600; }
+    .status-warn { color: #fbbf24; font-weight: 600; }
+    td.speed-cell { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    .field-row {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: #8b8fa3;
+    }
+    .field-row label { display: flex; align-items: center; gap: 6px; }
+    .field-row input[type=number] {
+      background: #0f1117;
+      color: #e1e4ea;
+      border: 1px solid #3a3d4a;
+      border-radius: 6px;
+      padding: 5px 8px;
+      width: 72px;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+    }
+    .field-row input[type=radio] { accent-color: #6366f1; }
+    .field-note { font-size: 11px; color: #555; margin-top: 8px; line-height: 1.5; }
+
+    .recal-btn {
+      background: none;
+      border: 1px solid #3a3d4a;
+      border-radius: 4px;
+      color: #8b8fa3;
+      cursor: pointer;
+      font-size: 11px;
+      padding: 2px 6px;
+      margin-left: 8px;
+    }
+    .recal-btn:hover:not(:disabled) { color: #6366f1; border-color: #6366f1; }
+    .recal-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .export-code {
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #e1e4ea;
+      white-space: pre;
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+
     .hidden { display: none !important; }
     .error-banner {
       padding: 12px 16px;
@@ -214,7 +269,31 @@
         <p>Measures speaking rate for each Kokoro and KittenTTS voice across cue, compact, and full coaching messages.</p>
       </div>
       <div class="top-bar-right">
-        <button class="btn btn-primary" id="run-btn">Run Benchmark</button>
+        <button class="btn btn-secondary" id="run-btn">Run Benchmark</button>
+        <button class="btn btn-primary" id="calibrate-btn">Calibrate</button>
+      </div>
+    </div>
+
+    <!-- Calibration target -->
+    <div class="card">
+      <h2>Calibration Target</h2>
+      <div class="field-row">
+        <label>Target <input type="number" id="cal-target" value="170" min="30" max="400" step="1"> WPM</label>
+        <label>Tolerance ± <input type="number" id="cal-tolerance" value="1" min="0.1" max="20" step="0.1"></label>
+        <label>Scope
+          <select id="cal-scope" style="background:#0f1117;color:#e1e4ea;border:1px solid #3a3d4a;border-radius:6px;padding:5px 8px;font-size:13px;">
+            <option value="both">Both models</option>
+            <option value="kokoro">Kokoro only</option>
+            <option value="kitten">KittenTTS only</option>
+          </select>
+        </label>
+        <label><input type="radio" name="cal-mode" value="full" checked> Full (15 sentences)</label>
+        <label><input type="radio" name="cal-mode" value="quick"> Quick (6 sentences)</label>
+      </div>
+      <div class="field-note">
+        Searches the speed that makes each voice hit the target, measured word-weighted
+        (total words ÷ total audio seconds). Quick mode uses a different word mix than Full,
+        so it solves for a slightly different speed — iterate with Quick, ship the Full numbers.
       </div>
     </div>
 
@@ -222,14 +301,14 @@
     <div class="card" style="margin-bottom: 12px;">
       <h2>Kokoro Speed</h2>
       <div style="display: flex; align-items: center; gap: 16px;">
-        <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
+        <input type="range" id="speed-slider" min="0.5" max="2.5" step="0.1" value="1.0"
           style="flex: 1; accent-color: #6366f1;">
         <span id="speed-value" style="font-size: 20px; font-weight: 700; color: #fff; min-width: 50px; text-align: right;">1.0x</span>
       </div>
       <div style="display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-top: 4px;">
         <span>0.5x (slow)</span>
         <span>1.0x (default)</span>
-        <span>2.0x (fast)</span>
+        <span>2.5x (fast)</span>
       </div>
     </div>
 
@@ -257,6 +336,9 @@
             <th>Compact</th>
             <th>Full</th>
             <th>Overall</th>
+            <th>Speed</th>
+            <th>WPM @ Speed</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody id="wpm-tbody">
@@ -268,14 +350,14 @@
     <div class="card" style="margin-top: 24px;">
       <h2>KittenTTS Speed</h2>
       <div style="display: flex; align-items: center; gap: 16px;">
-        <input type="range" id="kitten-speed-slider" min="0.5" max="2.0" step="0.1" value="1.0"
+        <input type="range" id="kitten-speed-slider" min="0.5" max="2.5" step="0.1" value="1.0"
           style="flex: 1; accent-color: #6366f1;">
         <span id="kitten-speed-value" style="font-size: 20px; font-weight: 700; color: #fff; min-width: 50px; text-align: right;">1.0x</span>
       </div>
       <div style="display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-top: 4px;">
         <span>0.5x (slow)</span>
         <span>1.0x (default)</span>
-        <span>2.0x (fast)</span>
+        <span>2.5x (fast)</span>
       </div>
     </div>
 
@@ -295,10 +377,40 @@
             <th>Compact</th>
             <th>Full</th>
             <th>Overall</th>
+            <th>Speed</th>
+            <th>WPM @ Speed</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody id="kitten-wpm-tbody"></tbody>
       </table>
+    </div>
+
+    <!-- Calibrated speeds export -->
+    <div class="card hidden" id="export-card">
+      <h2>Calibrated Speeds</h2>
+      <button class="btn btn-secondary" id="copy-btn" style="padding:6px 12px;font-size:12px;">Copy</button>
+      <div class="export-code" id="export-code"></div>
+    </div>
+
+    <!-- Calibration detail -->
+    <div class="card">
+      <button class="detail-toggle" id="cal-detail-toggle">Show calibration detail</button>
+      <div class="detail-table" id="cal-detail-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Voice</th>
+              <th>Pass</th>
+              <th>Speed</th>
+              <th>Measured WPM</th>
+              <th>Δ from target</th>
+            </tr>
+          </thead>
+          <tbody id="cal-detail-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Per-sentence detail -->
@@ -368,7 +480,7 @@
 
     <div class="footer">
       <span>kokoro-js 1.2.1 &middot; kitten-tts-js (nano 0.8 fp32) &middot; CPU inference via onnxruntime-node</span><br>
-      <span>WPM = (word count / audio duration) &times; 60</span>
+      <span>WPM = total words &divide; total audio seconds &times; 60 (word-weighted)</span>
     </div>
   </div>
 
@@ -413,16 +525,14 @@
       return new Float32Array(raw.buffer);
     }
 
-    async function fetchKokoroAudio(voiceId, text) {
-      const speed = parseFloat($('speed-slider').value);
+    async function fetchKokoroAudio(voiceId, text, speed) {
       const res = await fetch(`/api/generate?text=${encodeURIComponent(text)}&voice=${voiceId}&speed=${speed}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return decodeAudio(data.audio);
     }
 
-    async function fetchKittenAudio(voiceId, text) {
-      const speed = parseFloat($('kitten-speed-slider').value);
+    async function fetchKittenAudio(voiceId, text, speed) {
       const res = await fetch('/api/kitten/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -435,11 +545,17 @@
 
     // ── WPM section ─────────────────────────────────
     // Owns one voice table plus its progress row. Kokoro and Kitten each get one.
-    function createWpmSection({ voices, tbodyId, statusId, progressFillId, fetchAudio }) {
+    function createWpmSection({ family, voices, tbodyId, statusId, progressFillId, speedSliderId, fetchAudio }) {
       const voiceRows = {};       // voice id -> { cue, compact, full, overall } TDs
       const voicePlayBtns = {};   // voice id -> { cue, compact, full } buttons
       const sampleTexts = {};     // cascade -> first sentence text (set during benchmark)
+      const calibrated = {};      // voice id -> { speed, wpm, status }
       const results = [];
+
+      // Once a voice is calibrated, its play button previews the calibrated speed —
+      // that's the speed you'd actually ship, so it's the one worth hearing.
+      const speedFor = (voiceId) =>
+        calibrated[voiceId]?.speed ?? parseFloat($(speedSliderId).value);
 
       async function play(voiceId, cascade, btn) {
         const text = sampleTexts[cascade];
@@ -448,7 +564,7 @@
         btn.classList.add('loading');
         btn.textContent = '...';
         try {
-          playAudio(await fetchAudio(voiceId, text));
+          playAudio(await fetchAudio(voiceId, text, speedFor(voiceId)));
         } catch (e) {
           console.error('Play failed:', e);
         }
@@ -481,6 +597,23 @@
         overallTd.textContent = '—';
         tr.appendChild(overallTd);
         voiceRows[v.id].overall = overallTd;
+
+        for (const key of ['speed', 'calWpm', 'status']) {
+          const td = document.createElement('td');
+          td.className = 'val muted';
+          td.textContent = '—';
+          tr.appendChild(td);
+          voiceRows[v.id][key] = td;
+        }
+
+        const recal = document.createElement('button');
+        recal.className = 'recal-btn';
+        recal.textContent = '↻';
+        recal.title = `Re-calibrate ${v.label}`;
+        recal.addEventListener('click', () => runCalibration({ scope: family, voices: [v.id] }));
+        voiceRows[v.id].status.appendChild(recal);
+        voiceRows[v.id].recalBtn = recal;
+
         tbody.appendChild(tr);
       }
 
@@ -492,10 +625,9 @@
         for (const cascade of CASCADES) {
           const cResults = voiceResults.filter(r => r.cascade === cascade);
           if (cResults.length) {
-            const avg = cResults.reduce((s, r) => s + r.wpm, 0) / cResults.length;
             // Keep play button reference before overwriting
             const btn = btns[cascade];
-            rows[cascade].textContent = avg.toFixed(1);
+            rows[cascade].textContent = wordWeightedWpm(cResults).toFixed(1);
             rows[cascade].className = 'val';
             rows[cascade].appendChild(btn);
             btn.classList.remove('hidden');
@@ -505,16 +637,57 @@
         }
 
         if (voiceResults.length) {
-          const avg = voiceResults.reduce((s, r) => s + r.wpm, 0) / voiceResults.length;
-          rows.overall.textContent = avg.toFixed(1);
+          rows.overall.textContent = wordWeightedWpm(voiceResults).toFixed(1);
           rows.overall.className = 'val highlight';
         }
       }
 
       return {
+        family,
         results,
+        calibrated,
+        voices,
         setStatus: (text) => { $(statusId).textContent = text; },
         setProgress: (pct) => { $(progressFillId).style.width = pct + '%'; },
+        setBusy(busy) {
+          for (const rows of Object.values(voiceRows)) rows.recalBtn.disabled = busy;
+        },
+        setCalibration(voiceId, { speed, wpm, status }) {
+          calibrated[voiceId] = { speed, wpm, status };
+          const rows = voiceRows[voiceId];
+          rows.speed.textContent = formatSpeed(speed);
+          rows.speed.className = 'val speed-cell';
+          rows.calWpm.textContent = wpm.toFixed(1);
+          rows.calWpm.className = 'val';
+
+          const label = { ok: '✓', quantized: '≈ closest', clamped: '⚠ clamped' }[status] ?? '⚠ no converge';
+          const title = {
+            ok: '',
+            // Not a search failure: achievable WPM jumps in steps, and here the step
+            // straddles the target. This is the closest any speed can get.
+            quantized: 'Closest achievable — WPM steps straight over the target here',
+            clamped: `Hit the speed limit: ${formatSpeed(speed)} only reaches ${wpm.toFixed(1)} WPM`,
+          }[status] ?? `Stopped after the pass cap at ${wpm.toFixed(1)} WPM`;
+
+          rows.status.textContent = label;
+          rows.status.className = status === 'ok' ? 'val status-ok'
+            : status === 'quantized' ? 'val status-near'
+            : 'val status-warn';
+          rows.status.title = title;
+          rows.status.appendChild(rows.recalBtn);
+        },
+        resetCalibration(voiceIds) {
+          for (const id of voiceIds || Object.keys(voiceRows)) {
+            delete calibrated[id];
+            const rows = voiceRows[id];
+            for (const key of ['speed', 'calWpm', 'status']) {
+              rows[key].textContent = '—';
+              rows[key].className = 'val muted';
+              rows[key].title = '';
+            }
+            rows.status.appendChild(rows.recalBtn);
+          }
+        },
         applyResult(r) {
           results.push(r);
           updateVoiceCells(r.voice);
@@ -539,20 +712,39 @@
     }
 
     const kokoroSection = createWpmSection({
+      family: 'kokoro',
       voices: KOKORO_VOICES,
       tbodyId: 'wpm-tbody',
       statusId: 'status',
       progressFillId: 'progress-fill',
+      speedSliderId: 'speed-slider',
       fetchAudio: fetchKokoroAudio,
     });
 
     const kittenSection = createWpmSection({
+      family: 'kitten',
       voices: KITTEN_VOICES,
       tbodyId: 'kitten-wpm-tbody',
       statusId: 'kitten-status',
       progressFillId: 'kitten-progress-fill',
+      speedSliderId: 'kitten-speed-slider',
       fetchAudio: fetchKittenAudio,
     });
+
+    const sectionFor = (family) => (family === 'kokoro' ? kokoroSection : kittenSection);
+
+    // Word-weighted speaking rate: total words / total audio seconds. Averaging the
+    // per-sentence WPMs would over-weight short cues, whose rate is dragged down by
+    // fixed lead-in/trailing silence. This must match the server's calibration metric.
+    // Calibrated speeds carry 3 decimals — the WPM staircase is coarse enough that
+    // 1.32x and 1.33x differ by 4 WPM — but trailing zeros are noise.
+    const formatSpeed = (s) => s.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') + 'x';
+
+    function wordWeightedWpm(rows) {
+      const words = rows.reduce((s, r) => s + r.wordCount, 0);
+      const seconds = rows.reduce((s, r) => s + r.audioDurationSec, 0);
+      return seconds ? (words / seconds) * 60 : 0;
+    }
 
     function addDetailRow(r) {
       const tr = document.createElement('tr');
@@ -648,6 +840,7 @@
     async function runBenchmark() {
       const btn = $('run-btn');
       btn.disabled = true;
+      $('calibrate-btn').disabled = true;
       $('error-banner').classList.remove('visible');
       $('summary-card').classList.add('hidden');
       $('detail-tbody').innerHTML = '';
@@ -676,7 +869,144 @@
         btn.textContent = 'Run Benchmark';
       } finally {
         btn.disabled = false;
+        $('calibrate-btn').disabled = false;
       }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ── Speed calibration ────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    let calibrating = false;
+
+    function addCalibrationRow(p) {
+      const tr = document.createElement('tr');
+      const sign = p.delta > 0 ? '+' : '';
+      tr.innerHTML = `
+        <td>${p.model}</td>
+        <td>${p.voiceLabel}</td>
+        <td class="val">${p.pass}/${p.maxPasses}</td>
+        <td class="val">${formatSpeed(p.speed)}</td>
+        <td class="val">${p.wpm.toFixed(1)}</td>
+        <td class="val">${sign}${p.delta.toFixed(1)}</td>
+      `;
+      $('cal-detail-tbody').appendChild(tr);
+    }
+
+    function renderExport(target) {
+      const lines = ['export const VOICE_SPEEDS = {'];
+      let any = false;
+
+      for (const section of [kokoroSection, kittenSection]) {
+        const entries = section.voices
+          .map(v => [v, section.calibrated[v.id]])
+          .filter(([, c]) => c);
+        if (!entries.length) continue;
+        any = true;
+
+        lines.push(`  ${section.family}: {`);
+        for (const [v, c] of entries) {
+          const key = /^[a-z_$][\w$]*$/i.test(v.id) ? v.id : `'${v.id}'`;
+          const speed = parseFloat(c.speed.toFixed(3));
+
+          if (c.status === 'ok') {
+            lines.push(`    ${key}: ${speed}, // ${c.wpm.toFixed(1)} WPM`);
+          } else if (c.status === 'quantized') {
+            // Best any speed can do — the WPM staircase steps over the target. Ship it.
+            lines.push(`    ${key}: ${speed}, // ${c.wpm.toFixed(1)} WPM — closest achievable to ${target}`);
+          } else {
+            // Clamped or non-converged: never let a voice that missed the target ship
+            // a number that looks valid.
+            lines.push(`    // ${key}: ${speed}, // MISSED ${target} — reaches only ${c.wpm.toFixed(1)} WPM`);
+          }
+        }
+        lines.push('  },');
+      }
+      lines.push('};');
+
+      if (!any) return;
+      $('export-code').textContent = lines.join('\n');
+      $('export-card').classList.remove('hidden');
+    }
+
+    function runCalibration({ scope, voices } = {}) {
+      if (calibrating) return;
+      calibrating = true;
+
+      const target = parseFloat($('cal-target').value) || 170;
+      const tolerance = parseFloat($('cal-tolerance').value) || 1;
+      const mode = document.querySelector('input[name="cal-mode"]:checked').value;
+      const effectiveScope = scope || $('cal-scope').value;
+
+      const params = new URLSearchParams({ target, tolerance, mode, scope: effectiveScope });
+      if (voices?.length) params.set('voices', voices.join(','));
+
+      const targeted = effectiveScope === 'both'
+        ? [kokoroSection, kittenSection]
+        : [sectionFor(effectiveScope)];
+
+      $('calibrate-btn').disabled = true;
+      $('calibrate-btn').textContent = 'Calibrating...';
+      $('run-btn').disabled = true;
+      $('error-banner').classList.remove('visible');
+
+      for (const s of targeted) {
+        s.setBusy(true);
+        s.resetCalibration(voices);
+        s.setProgress(0);
+      }
+      if (!voices?.length) $('cal-detail-tbody').innerHTML = '';
+
+      const finish = () => {
+        calibrating = false;
+        $('calibrate-btn').disabled = false;
+        $('calibrate-btn').textContent = 'Calibrate';
+        $('run-btn').disabled = false;
+        for (const s of targeted) s.setBusy(false);
+      };
+
+      const eventSource = new EventSource(`/api/calibrate?${params}`);
+      let settled = false;
+
+      eventSource.addEventListener('progress', (e) => {
+        const d = JSON.parse(e.data);
+        const section = d.model ? sectionFor(d.model) : null;
+        if (section) {
+          section.setStatus(d.status);
+          if (d.total > 0) section.setProgress(Math.round((d.done / d.total) * 100));
+        } else {
+          for (const s of targeted) s.setStatus(d.status);
+        }
+      });
+
+      eventSource.addEventListener('pass', (e) => addCalibrationRow(JSON.parse(e.data)));
+
+      eventSource.addEventListener('voice', (e) => {
+        const d = JSON.parse(e.data);
+        sectionFor(d.model).setCalibration(d.voice, d);
+      });
+
+      eventSource.addEventListener('done', (e) => {
+        settled = true;
+        eventSource.close();
+        const d = JSON.parse(e.data);
+        for (const s of targeted) {
+          s.setProgress(100);
+          s.setStatus(`Calibrated to ${d.target} WPM.`);
+        }
+        renderExport(d.target);
+        finish();
+      });
+
+      eventSource.addEventListener('error', (e) => {
+        if (settled) return;
+        settled = true;
+        eventSource.close();
+        $('error-banner').textContent = 'Error: ' + (e.data
+          ? JSON.parse(e.data).message
+          : 'Connection error. Is the server running? (pnpm serve)');
+        $('error-banner').classList.add('visible');
+        finish();
+      });
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -857,6 +1187,19 @@
 
     // ── Event listeners ──────────────────────────────────────────
     $('run-btn').addEventListener('click', runBenchmark);
+    $('calibrate-btn').addEventListener('click', () => runCalibration());
+
+    $('cal-detail-toggle').addEventListener('click', () => {
+      const detail = $('cal-detail-table');
+      const visible = detail.classList.toggle('visible');
+      $('cal-detail-toggle').textContent = visible ? 'Hide calibration detail' : 'Show calibration detail';
+    });
+
+    $('copy-btn').addEventListener('click', async () => {
+      await navigator.clipboard.writeText($('export-code').textContent);
+      $('copy-btn').textContent = 'Copied';
+      setTimeout(() => { $('copy-btn').textContent = 'Copy'; }, 1200);
+    });
     $('ws-run-btn').addEventListener('click', runWebSpeechBenchmark);
 
     $('speed-slider').addEventListener('input', () => {

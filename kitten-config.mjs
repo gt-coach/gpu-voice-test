@@ -120,19 +120,23 @@ export const KITTEN_THREAD_OPTIONS = [
   { value: 'auto', label: 'Auto' },
 ];
 
+// Ceiling raised past 2.0 so the slowest Kitten voices can reach the WPM target:
+// Bella only reaches 163 WPM at 2.0x and needs ~2.1x for 170.
 export const KITTEN_SPEED = {
   min: 0.5,
-  max: 2,
+  max: 2.5,
   step: 0.1,
   default: 1,
 };
 
 export const KOKORO_SPEED = {
   min: 0.5,
-  max: 2,
+  max: 2.5,
   step: 0.1,
   default: 1.3,
 };
+
+export const WPM_TARGET = 170;
 
 export const SUPERTONIC_SPEED = {
   min: 0.7,
@@ -178,6 +182,20 @@ export function clampKittenSpeed(value) {
   const parsed = Number.parseFloat(value);
   if (!Number.isFinite(parsed)) return KITTEN_SPEED.default;
   return Math.max(KITTEN_SPEED.min, Math.min(KITTEN_SPEED.max, parsed));
+}
+
+export function clampKokoroSpeed(value) {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(KOKORO_SPEED.min, Math.min(KOKORO_SPEED.max, parsed));
+}
+
+export function speedLimitsFor(family) {
+  return family === 'kokoro' ? KOKORO_SPEED : KITTEN_SPEED;
+}
+
+export function clampSpeedFor(family, value) {
+  return family === 'kokoro' ? clampKokoroSpeed(value) : clampKittenSpeed(value);
 }
 
 export function clampSupertonicSpeed(value) {
