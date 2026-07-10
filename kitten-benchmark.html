@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GT Coach - TTS Benchmark</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4ea;
+      min-height: 100vh;
+    }
+    .container {
+      width: calc(100vw - 64px);
+      max-width: none;
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+    @media (max-width: 720px) {
+      .container {
+        width: 100%;
+        padding: 24px 16px;
+      }
+    }
+    nav {
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    nav a {
+      color: #6366f1;
+      text-decoration: none;
+    }
+    nav a:hover { text-decoration: underline; }
+    .top-bar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .top-bar h1 {
+      font-size: 22px;
+      font-weight: 650;
+      color: #fff;
+      letter-spacing: 0;
+    }
+    .top-bar p {
+      font-size: 13px;
+      color: #8b8fa3;
+      margin-top: 4px;
+      line-height: 1.5;
+      max-width: 720px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .btn {
+      padding: 10px 18px;
+      border: 0;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.86; }
+    .btn:disabled { opacity: 0.42; cursor: not-allowed; }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-secondary { background: #2a2d3a; color: #e1e4ea; }
+    .btn-sm {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+      .actions { width: 100%; }
+      .actions .btn { flex: 1; }
+    }
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .card h2 {
+      font-size: 12px;
+      font-weight: 650;
+      color: #8b8df8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+    .field {
+      margin-bottom: 14px;
+    }
+    .field:last-child { margin-bottom: 0; }
+    .field-note {
+      color: #777b8f;
+      font-size: 11px;
+      line-height: 1.4;
+      margin-top: 6px;
+    }
+    label,
+    .field-label {
+      display: block;
+      color: #8b8fa3;
+      font-size: 12px;
+      font-weight: 650;
+      margin-bottom: 6px;
+    }
+    select,
+    textarea,
+    input[type="number"] {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #343849;
+      color: #e1e4ea;
+      border-radius: 8px;
+      padding: 9px 10px;
+      font: inherit;
+      font-size: 13px;
+    }
+    textarea {
+      min-height: 104px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #6366f1;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .model-list {
+      display: grid;
+      gap: 8px;
+    }
+    .model-choice {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+    }
+    .model-choice input {
+      margin-top: 3px;
+      accent-color: #6366f1;
+    }
+    .model-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 650;
+      color: #fff;
+    }
+    .model-meta {
+      font-size: 12px;
+      color: #8b8fa3;
+      line-height: 1.4;
+      margin-top: 2px;
+    }
+    .inline-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #e1e4ea;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .inline-check input { accent-color: #6366f1; }
+    .family-list {
+      display: grid;
+      gap: 12px;
+    }
+    .family-panel {
+      padding: 12px;
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+    }
+    .family-panel h3 {
+      color: #fff;
+      font-size: 13px;
+      font-weight: 650;
+      margin-bottom: 10px;
+    }
+    .family-panel .field {
+      margin-bottom: 10px;
+    }
+    .family-panel .inline-check {
+      margin-top: 4px;
+    }
+    .status-banner {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 650;
+      margin-bottom: 12px;
+      background: rgba(96,165,250,0.1);
+      border: 1px solid rgba(96,165,250,0.25);
+      color: #60a5fa;
+    }
+    .status-banner.visible { display: block; }
+    .status-banner.error {
+      background: rgba(248,113,113,0.1);
+      border-color: rgba(248,113,113,0.3);
+      color: #f87171;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    @media (max-width: 720px) {
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .split { grid-template-columns: 1fr; }
+    }
+    .summary-stat {
+      background: #0f1117;
+      border: 1px solid #2a2d3a;
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 74px;
+    }
+    .summary-stat .number {
+      color: #fff;
+      font-size: 22px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary-stat .label {
+      color: #8b8fa3;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 980px;
+    }
+    th,
+    td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #2a2d3a;
+      text-align: right;
+      vertical-align: middle;
+    }
+    th {
+      color: #8b8fa3;
+      font-weight: 650;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    th:first-child,
+    td:first-child { text-align: left; }
+    td {
+      color: #e1e4ea;
+      font-variant-numeric: tabular-nums;
+    }
+    .muted { color: #777b8f; }
+    .good { color: #4ade80; }
+    .warn { color: #fbbf24; }
+    .bad { color: #f87171; }
+    .empty-state {
+      color: #777b8f;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 20px 0 4px;
+    }
+    .row-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-start;
+      margin-top: 8px;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav><a href="/">Voice Test</a> / TTS Benchmark</nav>
+
+    <div class="top-bar">
+      <div>
+        <h1>TTS Benchmark</h1>
+        <p>Local comparison for KittenTTS, Kokoro, and Supertonic candidates using GT Coach messages.</p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
+        <button class="btn btn-primary" id="run-btn" disabled>Generate</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>Models</h2>
+          <div class="model-list" id="model-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>Family Controls</h2>
+          <div id="family-controls"></div>
+        </div>
+
+        <div class="card">
+          <h2>Playback</h2>
+          <div class="field">
+            <label for="effect-select">Effect</label>
+            <select id="effect-select"></select>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Message</h2>
+          <div class="field">
+            <label for="message-select">Preset</label>
+            <select id="message-select"></select>
+          </div>
+          <div class="field">
+            <label for="text-input">Text</label>
+            <textarea id="text-input"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="status-banner" id="status-banner"></div>
+
+        <div class="card hidden" id="summary-card">
+          <h2>Summary</h2>
+          <div class="summary-grid" id="summary-grid"></div>
+        </div>
+
+        <div class="card">
+          <h2>Results</h2>
+          <div class="table-wrap hidden" id="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Status</th>
+                  <th>Threading</th>
+                  <th>Load</th>
+                  <th>Generation</th>
+                  <th>Audio</th>
+                  <th>RTF</th>
+                  <th>RMS</th>
+                  <th>Peak</th>
+                  <th>Clip</th>
+                  <th>Gain</th>
+                </tr>
+              </thead>
+              <tbody id="results-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="empty-state">Select models and generate a sample.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const KOKORO_CDN = 'https://esm.sh/kokoro-js@1.2.1?deps=@huggingface/transformers@4.0.0-next.8';
+    const SETTINGS_KEY = 'gtCoach.kittenBenchmark.settings.v2';
+    const DEFAULT_EFFECT = 'race-engineer';
+    const EFFECT_PRESETS = [
+      { id: 'dry', label: 'Dry' },
+      {
+        id: 'race-engineer',
+        label: 'Race engineer',
+        highpass: 280,
+        lowpass: 3900,
+        presenceHz: 2100,
+        presenceDb: 3,
+        presenceQ: 0.9,
+        threshold: 0.18,
+        ratio: 3,
+        makeup: 1.35,
+        drive: 1.3,
+      },
+      {
+        id: 'helmet-intercom',
+        label: 'Helmet intercom',
+        highpass: 190,
+        lowpass: 5200,
+        presenceHz: 1700,
+        presenceDb: 2,
+        presenceQ: 0.8,
+        threshold: 0.16,
+        ratio: 2.4,
+        makeup: 1.25,
+        drive: 1.12,
+      },
+      {
+        id: 'pit-wall-radio',
+        label: 'Pit wall radio',
+        highpass: 320,
+        lowpass: 3200,
+        presenceHz: 2300,
+        presenceDb: 4,
+        presenceQ: 1.1,
+        threshold: 0.14,
+        ratio: 4,
+        makeup: 1.55,
+        drive: 1.65,
+        noise: 0.0009,
+        click: 0.018,
+      },
+    ];
+    const state = {
+      config: null,
+      rows: new Map(),
+      audio: new Map(),
+      audioContext: null,
+      settings: loadSettings(),
+      kokoroModels: new Map(),
+      kokoroModule: null,
+    };
+
+    function setStatus(message, kind = 'info') {
+      const banner = $('status-banner');
+      banner.textContent = message;
+      banner.className = `status-banner visible${kind === 'error' ? ' error' : ''}`;
+    }
+
+    function clearStatus() {
+      $('status-banner').className = 'status-banner';
+      $('status-banner').textContent = '';
+    }
+
+    function loadSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveSettings() {
+      if (!state.config) return;
+      const family = {};
+      document.querySelectorAll('[data-family-panel]').forEach((panel) => {
+        const key = panel.dataset.familyPanel;
+        const voice = panel.querySelector('[data-family-voice]')?.value;
+        const speed = Number(panel.querySelector('[data-family-speed]')?.value);
+        const steps = Number(panel.querySelector('[data-family-steps]')?.value);
+        const threads = panel.querySelector('[data-family-threads]')?.value;
+        const cleanInput = panel.querySelector('[data-family-clean]');
+        family[key] = {
+          voice,
+          speed,
+          ...(Number.isFinite(steps) ? { steps } : {}),
+          ...(threads ? { threads } : {}),
+          ...(cleanInput ? { clean: cleanInput.checked } : {}),
+        };
+      });
+
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        models: [...document.querySelectorAll('[data-model-checkbox]')]
+          .filter((input) => input.checked)
+          .map((input) => input.value),
+        effect: $('effect-select').value,
+        family,
+        messageId: $('message-select').value,
+        text: $('text-input').value,
+      }));
+    }
+
+    function optionExists(select, value) {
+      return [...select.options].some((option) => option.value === value);
+    }
+
+    function setSelectValue(id, value) {
+      const select = $(id);
+      if (value != null && optionExists(select, value)) {
+        select.value = value;
+      }
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function fmtMs(ms) {
+      if (!Number.isFinite(ms)) return '-';
+      return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+    }
+
+    function fmtDuration(seconds) {
+      if (!Number.isFinite(seconds)) return '-';
+      return `${seconds.toFixed(2)}s`;
+    }
+
+    function round(value, digits = 2) {
+      if (!Number.isFinite(value)) return value;
+      const multiplier = 10 ** digits;
+      return Math.round(value * multiplier) / multiplier;
+    }
+
+    function sliderDecimals(step) {
+      const normalized = String(step ?? '1');
+      const decimal = normalized.includes('.') ? normalized.split('.')[1].length : 0;
+      return Math.min(3, decimal);
+    }
+
+    function formatSpeed(value, step) {
+      return `${Number(value).toFixed(sliderDecimals(step))}x`;
+    }
+
+    function audioStats(samples) {
+      if (!samples.length) {
+        return { min: 0, max: 0, peak: 0, rms: 0, clipCount: 0, clipPercent: 0, nanCount: 0 };
+      }
+
+      let min = Infinity;
+      let max = -Infinity;
+      let sum = 0;
+      let clipCount = 0;
+      let nanCount = 0;
+
+      for (const sample of samples) {
+        if (!Number.isFinite(sample)) {
+          nanCount++;
+          continue;
+        }
+        min = Math.min(min, sample);
+        max = Math.max(max, sample);
+        sum += sample * sample;
+        if (Math.abs(sample) >= 1) clipCount++;
+      }
+
+      return {
+        min,
+        max,
+        peak: Math.max(Math.abs(min), Math.abs(max)),
+        rms: Math.sqrt(sum / samples.length),
+        clipCount,
+        clipPercent: (clipCount / samples.length) * 100,
+        nanCount,
+      };
+    }
+
+    function playbackGainForPeak(peak) {
+      return Number.isFinite(peak) && peak > 1 ? 0.98 / peak : 1;
+    }
+
+    function selectedModels() {
+      return [...document.querySelectorAll('[data-model-checkbox]:checked')]
+        .map((input) => state.config.models.find((model) => model.id === input.value))
+        .filter(Boolean);
+    }
+
+    function renderModels(models) {
+      const currentIds = new Set(models.flatMap((model) => [model.id, model.modelId]));
+      const validSavedModels = Array.isArray(state.settings.models)
+        ? state.settings.models.filter((id) => currentIds.has(id))
+        : null;
+      const savedModels = validSavedModels?.length ? validSavedModels : null;
+      $('model-list').innerHTML = models.map((model) => `
+        <label class="model-choice">
+          <input type="checkbox" data-model-checkbox value="${model.id}" ${!savedModels || savedModels.includes(model.id) || savedModels.includes(model.modelId) ? 'checked' : ''}>
+          <span>
+            <span class="model-title">
+              <span>${model.label}</span>
+              <span class="muted">${model.size}</span>
+            </span>
+            <span class="model-meta">${model.role}${model.note ? ` - ${model.note}` : ''}</span>
+          </span>
+        </label>
+      `).join('');
+    }
+
+    function renderFamilyControls(config) {
+      const controls = config.familyControls || {};
+      $('family-controls').innerHTML = `
+        <div class="family-list">
+          ${Object.entries(controls).map(([family, control]) => `
+            <div class="family-panel" data-family-panel="${family}">
+              <h3>${control.label}</h3>
+              <div class="field">
+                <label for="${family}-voice">Voice</label>
+                <select id="${family}-voice" data-family-voice="${family}">
+                  ${control.voices.map((voice) => (
+                    `<option value="${voice.id}" ${voice.id === control.defaultVoice ? 'selected' : ''}>${voice.label} (${voice.gender})</option>`
+                  )).join('')}
+                </select>
+              </div>
+              ${control.threads ? `
+                <div class="field">
+                  <label for="${family}-threads">${control.threadLabel || 'Threads'}</label>
+                  <select id="${family}-threads" data-family-threads="${family}">
+                    ${control.threads.map((threads) => (
+                      `<option value="${threads.value}" ${threads.value === control.defaultThreads ? 'selected' : ''}>${threads.label}</option>`
+                    )).join('')}
+                  </select>
+                  ${control.threadNote ? `<div class="field-note">${control.threadNote}</div>` : ''}
+                </div>
+              ` : ''}
+              <div class="field">
+                <label for="${family}-speed">Speed <span data-family-speed-value="${family}">${formatSpeed(control.speed.default, control.speed.step)}</span></label>
+                <input
+                  type="range"
+                  id="${family}-speed"
+                  data-family-speed="${family}"
+                  min="${control.speed.min}"
+                  max="${control.speed.max}"
+                  step="${control.speed.step}"
+                  value="${control.speed.default}"
+                >
+              </div>
+              ${control.steps ? `
+                <div class="field">
+                  <label for="${family}-steps">${control.stepLabel || 'Steps'} <span data-family-steps-value="${family}">${Number(control.steps.default).toFixed(0)}</span></label>
+                  <input
+                    type="range"
+                    id="${family}-steps"
+                    data-family-steps="${family}"
+                    min="${control.steps.min}"
+                    max="${control.steps.max}"
+                    step="${control.steps.step}"
+                    value="${control.steps.default}"
+                  >
+                  ${control.stepNote ? `<div class="field-note">${control.stepNote}</div>` : ''}
+                </div>
+              ` : ''}
+              ${family === 'kitten' ? `
+                <label class="inline-check">
+                  <input type="checkbox" data-family-clean="${family}" ${control.clean ? 'checked' : ''}>
+                  Clean text
+                </label>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function renderOptions(config) {
+      renderModels(config.models);
+      renderFamilyControls(config);
+
+      $('effect-select').innerHTML = EFFECT_PRESETS.map((effect) => (
+        `<option value="${effect.id}" ${effect.id === DEFAULT_EFFECT ? 'selected' : ''}>${effect.label}</option>`
+      )).join('');
+
+      $('message-select').innerHTML = [
+        `<option value="custom">Custom</option>`,
+        ...config.messages.map((message) => (
+          `<option value="${message.id}">${message.cascade}: ${message.text}</option>`
+        )),
+      ].join('');
+      $('text-input').value = config.defaultText;
+      applySettings(config);
+    }
+
+    function applySettings(config) {
+      const settings = state.settings || {};
+      setSelectValue('effect-select', settings.effect);
+      const familySettings = settings.family || {};
+
+      for (const [family, control] of Object.entries(config.familyControls || {})) {
+        const saved = familySettings[family] || {};
+        const legacyVoice = family === 'kitten' ? settings.voice : null;
+        const legacySpeed = family === 'kitten' ? settings.speed : null;
+        const legacyThreads = family === 'kitten' ? settings.threads : null;
+        const legacyClean = family === 'kitten' ? settings.clean : null;
+
+        const voiceSelect = document.querySelector(`[data-family-voice="${family}"]`);
+        const threadSelect = document.querySelector(`[data-family-threads="${family}"]`);
+        const speedInput = document.querySelector(`[data-family-speed="${family}"]`);
+        const speedValue = document.querySelector(`[data-family-speed-value="${family}"]`);
+        const stepsInput = document.querySelector(`[data-family-steps="${family}"]`);
+        const stepsValue = document.querySelector(`[data-family-steps-value="${family}"]`);
+        const cleanInput = document.querySelector(`[data-family-clean="${family}"]`);
+
+        if (voiceSelect && (saved.voice || legacyVoice) && optionExists(voiceSelect, saved.voice || legacyVoice)) {
+          voiceSelect.value = saved.voice || legacyVoice;
+        }
+        if (threadSelect && (saved.threads || legacyThreads) && optionExists(threadSelect, saved.threads || legacyThreads)) {
+          threadSelect.value = saved.threads || legacyThreads;
+        }
+        const speed = Number.isFinite(saved.speed) ? saved.speed : legacySpeed;
+        if (speedInput && Number.isFinite(speed)) {
+          const nextSpeed = clamp(speed, control.speed.min, control.speed.max);
+          speedInput.value = nextSpeed;
+          if (speedValue) speedValue.textContent = formatSpeed(nextSpeed, control.speed.step);
+        }
+        const steps = Number.isFinite(saved.steps) ? saved.steps : null;
+        if (stepsInput && Number.isFinite(steps)) {
+          const nextSteps = clamp(steps, control.steps.min, control.steps.max);
+          stepsInput.value = nextSteps;
+          if (stepsValue) stepsValue.textContent = String(Math.round(nextSteps));
+        }
+        const clean = typeof saved.clean === 'boolean' ? saved.clean : legacyClean;
+        if (cleanInput && typeof clean === 'boolean') {
+          cleanInput.checked = clean;
+        }
+      }
+
+      if (settings.messageId && optionExists($('message-select'), settings.messageId)) {
+        $('message-select').value = settings.messageId;
+      }
+
+      if ($('message-select').value === 'custom') {
+        if (typeof settings.text === 'string') {
+          $('text-input').value = settings.text;
+        }
+      } else {
+        const message = config.messages.find((item) => item.id === $('message-select').value);
+        $('text-input').value = message?.text || config.defaultText;
+      }
+    }
+
+    function rowTemplate(id, model, status = 'Queued') {
+      return `
+        <tr data-row-id="${id}">
+          <td>
+            <strong>${model.label}</strong><br>
+            <span class="muted">${model.modelId}</span>
+            <div class="row-actions">
+              <button class="btn btn-secondary btn-sm" data-action="play" data-id="${id}" disabled>Play</button>
+              <button class="btn btn-secondary btn-sm" data-action="download" data-id="${id}" disabled>WAV</button>
+            </div>
+          </td>
+          <td data-cell="status">${status}</td>
+          <td data-cell="threading">-</td>
+          <td data-cell="load">-</td>
+          <td data-cell="gen">-</td>
+          <td data-cell="duration">-</td>
+          <td data-cell="rtf">-</td>
+          <td data-cell="rms">-</td>
+          <td data-cell="peak">-</td>
+          <td data-cell="clip">-</td>
+          <td data-cell="gain">-</td>
+        </tr>
+      `;
+    }
+
+    function setCell(id, name, value, className = '') {
+      const row = state.rows.get(id);
+      if (!row) return;
+      const cell = row.querySelector(`[data-cell="${name}"]`);
+      if (!cell) return;
+      cell.textContent = value;
+      cell.className = className;
+    }
+
+    function setActionsEnabled(id, enabled) {
+      const row = state.rows.get(id);
+      if (!row) return;
+      row.querySelectorAll('button[data-action]').forEach((button) => {
+        button.disabled = !enabled;
+      });
+    }
+
+    function rtfClass(value) {
+      if (value >= 2) return 'good';
+      if (value >= 1) return 'warn';
+      return 'bad';
+    }
+
+    function decodeFloat32(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new Float32Array(bytes.buffer);
+    }
+
+    function samplesWithGain(samples, gain) {
+      if (!Number.isFinite(gain) || gain === 1) return samples;
+      const scaled = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        scaled[i] = samples[i] * gain;
+      }
+      return scaled;
+    }
+
+    function currentEffectPreset() {
+      return EFFECT_PRESETS.find((effect) => effect.id === $('effect-select').value) || EFFECT_PRESETS[0];
+    }
+
+    function biquad(type, sampleRate, frequency, q = 0.707, gainDb = 0) {
+      frequency = clamp(frequency, 20, sampleRate / 2 - 100);
+      const w0 = (2 * Math.PI * frequency) / sampleRate;
+      const cos = Math.cos(w0);
+      const sin = Math.sin(w0);
+      const alpha = sin / (2 * q);
+      const a = 10 ** (gainDb / 40);
+      let b0;
+      let b1;
+      let b2;
+      let a0;
+      let a1;
+      let a2;
+
+      if (type === 'highpass') {
+        b0 = (1 + cos) / 2;
+        b1 = -(1 + cos);
+        b2 = (1 + cos) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cos;
+        a2 = 1 - alpha;
+      } else if (type === 'lowpass') {
+        b0 = (1 - cos) / 2;
+        b1 = 1 - cos;
+        b2 = (1 - cos) / 2;
+        a0 = 1 + alpha;
+        a1 = -2 * cos;
+        a2 = 1 - alpha;
+      } else {
+        b0 = 1 + alpha * a;
+        b1 = -2 * cos;
+        b2 = 1 - alpha * a;
+        a0 = 1 + alpha / a;
+        a1 = -2 * cos;
+        a2 = 1 - alpha / a;
+      }
+
+      return {
+        b0: b0 / a0,
+        b1: b1 / a0,
+        b2: b2 / a0,
+        a1: a1 / a0,
+        a2: a2 / a0,
+      };
+    }
+
+    function applyBiquad(samples, coeffs) {
+      const out = new Float32Array(samples.length);
+      let x1 = 0;
+      let x2 = 0;
+      let y1 = 0;
+      let y2 = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const x0 = samples[i];
+        const y0 = coeffs.b0 * x0 + coeffs.b1 * x1 + coeffs.b2 * x2 - coeffs.a1 * y1 - coeffs.a2 * y2;
+        out[i] = y0;
+        x2 = x1;
+        x1 = x0;
+        y2 = y1;
+        y1 = y0;
+      }
+      return out;
+    }
+
+    function compress(samples, threshold, ratio, makeup) {
+      const out = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i];
+        const sign = Math.sign(sample);
+        const abs = Math.abs(sample);
+        const compressed = abs <= threshold ? abs : threshold + ((abs - threshold) / ratio);
+        out[i] = sign * compressed * makeup;
+      }
+      return out;
+    }
+
+    function saturate(samples, drive) {
+      if (!drive || drive === 1) return samples;
+      const out = new Float32Array(samples.length);
+      const norm = Math.tanh(drive);
+      for (let i = 0; i < samples.length; i++) {
+        out[i] = Math.tanh(samples[i] * drive) / norm;
+      }
+      return out;
+    }
+
+    function randomGenerator(seed) {
+      let state = seed >>> 0;
+      return () => {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        return (state / 0x80000000) - 1;
+      };
+    }
+
+    function addRadioTexture(samples, sampleRate, noise = 0, click = 0) {
+      if (!noise && !click) return samples;
+      const out = new Float32Array(samples);
+      const random = randomGenerator(samples.length + Math.round(sampleRate));
+
+      if (noise) {
+        for (let i = 0; i < out.length; i++) {
+          out[i] += random() * noise;
+        }
+      }
+
+      if (click) {
+        const clickLen = Math.min(Math.floor(sampleRate * 0.045), Math.floor(out.length / 2));
+        for (let i = 0; i < clickLen; i++) {
+          const env = (1 - (i / clickLen)) ** 2;
+          out[i] += random() * click * env;
+          out[out.length - 1 - i] += random() * click * env;
+        }
+      }
+
+      return out;
+    }
+
+    function limitPeak(samples, ceiling = 0.98) {
+      let peak = 0;
+      for (const sample of samples) {
+        peak = Math.max(peak, Math.abs(sample));
+      }
+      if (peak <= ceiling) return samples;
+      return samplesWithGain(samples, ceiling / peak);
+    }
+
+    function processPlaybackSamples(item) {
+      const preset = currentEffectPreset();
+      let samples = samplesWithGain(item.samples, item.playbackGain);
+      if (preset.id === 'dry') return samples;
+
+      samples = applyBiquad(samples, biquad('highpass', item.sampleRate, preset.highpass));
+      samples = applyBiquad(samples, biquad('lowpass', item.sampleRate, preset.lowpass));
+      samples = applyBiquad(samples, biquad('peaking', item.sampleRate, preset.presenceHz, preset.presenceQ, preset.presenceDb));
+      samples = compress(samples, preset.threshold, preset.ratio, preset.makeup);
+      samples = saturate(samples, preset.drive);
+      samples = applyBiquad(samples, biquad('lowpass', item.sampleRate, preset.lowpass));
+      samples = addRadioTexture(samples, item.sampleRate, preset.noise, preset.click);
+      return limitPeak(samples);
+    }
+
+    function encodeWav(samples, sampleRate) {
+      const dataSize = samples.length * 2;
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+
+      function writeString(offset, value) {
+        for (let i = 0; i < value.length; i++) {
+          view.setUint8(offset + i, value.charCodeAt(i));
+        }
+      }
+
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      let offset = 44;
+      for (const sample of samples) {
+        const clamped = Math.max(-1, Math.min(1, sample));
+        view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+        offset += 2;
+      }
+
+      return buffer;
+    }
+
+    async function playAudio(id) {
+      const item = state.audio.get(id);
+      if (!item) return;
+      state.audioContext ??= new AudioContext({ sampleRate: item.sampleRate });
+      if (state.audioContext.state === 'suspended') {
+        await state.audioContext.resume();
+      }
+      const playbackSamples = processPlaybackSamples(item);
+      const audioBuffer = state.audioContext.createBuffer(1, playbackSamples.length, item.sampleRate);
+      audioBuffer.copyToChannel(playbackSamples, 0);
+      const source = state.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(state.audioContext.destination);
+      source.start();
+    }
+
+    function downloadAudio(id) {
+      const item = state.audio.get(id);
+      if (!item) return;
+      const effect = currentEffectPreset();
+      const wav = encodeWav(processPlaybackSamples(item), item.sampleRate);
+      const blob = new Blob([wav], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${item.fileBase}-${effect.id}.wav`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function renderSummary(results) {
+      if (results.length === 0) {
+        $('summary-card').classList.add('hidden');
+        return;
+      }
+
+      const fastest = [...results].sort((a, b) => b.rtf - a.rtf)[0];
+      const avgRtf = results.reduce((sum, item) => sum + item.rtf, 0) / results.length;
+      const avgGen = results.reduce((sum, item) => sum + item.genTimeMs, 0) / results.length;
+      const cached = results.filter((item) => item.model.cached).length;
+
+      $('summary-grid').innerHTML = `
+        <div class="summary-stat">
+          <div class="number">${results.length}</div>
+          <div class="label">Generated</div>
+        </div>
+        <div class="summary-stat">
+          <div class="number">${avgRtf.toFixed(2)}x</div>
+          <div class="label">Average RTF</div>
+        </div>
+        <div class="summary-stat">
+          <div class="number">${fmtMs(avgGen)}</div>
+          <div class="label">Average Generate</div>
+        </div>
+        <div class="summary-stat">
+          <div class="number">${fastest.model.label}</div>
+          <div class="label">Fastest</div>
+        </div>
+      `;
+      $('summary-card').classList.remove('hidden');
+      setStatus(`${results.length} samples ready. ${cached} model loads reused the in-memory cache.`);
+    }
+
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      return payload;
+    }
+
+    function getFamilyOptions(family) {
+      const speed = Number(document.querySelector(`[data-family-speed="${family}"]`)?.value);
+      const totalSteps = Number(document.querySelector(`[data-family-steps="${family}"]`)?.value);
+      return {
+        voice: document.querySelector(`[data-family-voice="${family}"]`)?.value,
+        speed: Number.isFinite(speed) ? speed : 1,
+        ...(Number.isFinite(totalSteps) ? { totalSteps } : {}),
+        clean: document.querySelector(`[data-family-clean="${family}"]`)?.checked,
+        numThreads: document.querySelector(`[data-family-threads="${family}"]`)?.value,
+      };
+    }
+
+    function threadingLabel(model, result) {
+      const threading = result.model.threading;
+      if (threading?.supported) {
+        return threading.applied === 'auto' ? 'ORT auto' : `${threading.applied} intra`;
+      }
+      if (model.family === 'kokoro') {
+        if (model.backend === 'webgpu') return 'WebGPU';
+        if (model.backend === 'wasm') return 'WASM runtime';
+        return 'Node runtime';
+      }
+      return '-';
+    }
+
+    function normalizedResult(model, samples, sampleRate, genTimeMs, loadMs, cached, extra = {}) {
+      const stats = audioStats(samples);
+      const audioDurationSec = samples.length / sampleRate;
+      const rtf = audioDurationSec / (genTimeMs / 1000);
+
+      return {
+        model: {
+          id: model.id,
+          modelId: model.modelId,
+          label: model.label,
+          cached,
+          loadMs,
+        },
+        sampleRate,
+        samples: samples.length,
+        audioDurationSec: round(audioDurationSec, 3),
+        genTimeMs: Math.round(genTimeMs),
+        rtf: round(rtf, 2),
+        min: round(stats.min, 6),
+        max: round(stats.max, 6),
+        peak: round(stats.peak, 6),
+        rms: round(stats.rms, 6),
+        clipCount: stats.clipCount,
+        clipPercent: round(stats.clipPercent, 4),
+        nanCount: stats.nanCount,
+        playbackGain: round(playbackGainForPeak(stats.peak), 6),
+        browserSamples: samples,
+        ...extra,
+      };
+    }
+
+    async function generateKitten(model, common) {
+      const result = await postJson('/api/kitten/generate', {
+        ...common,
+        modelId: model.modelId,
+      });
+      result.browserSamples = decodeFloat32(result.audio);
+      return result;
+    }
+
+    async function generateSupertonic(model, common) {
+      const result = await postJson('/api/supertonic/generate', common);
+      result.browserSamples = decodeFloat32(result.audio);
+      return result;
+    }
+
+    async function generateKokoroNode(model, common) {
+      const url = `/api/generate?text=${encodeURIComponent(common.text)}&voice=${encodeURIComponent(common.voice || model.voice || 'am_adam')}&speed=${encodeURIComponent(common.speed)}`;
+      const response = await fetch(url);
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      const samples = decodeFloat32(payload.audio);
+      return normalizedResult(model, samples, 24000, payload.genTimeMs, 0, true, {
+        model: {
+          id: model.id,
+          modelId: model.modelId,
+          label: model.label,
+          cached: true,
+          loadMs: 0,
+        },
+      });
+    }
+
+    async function getKokoroBrowserModel(model) {
+      const key = `${model.modelId}:${model.backend}`;
+      if (state.kokoroModels.has(key)) {
+        return { model: state.kokoroModels.get(key), loadMs: 0, cached: true };
+      }
+
+      state.kokoroModule ??= await import(KOKORO_CDN);
+      const start = performance.now();
+      const kokoro = await state.kokoroModule.KokoroTTS.from_pretrained(model.modelId, {
+        dtype: 'fp32',
+        device: model.backend,
+      });
+      const loadMs = performance.now() - start;
+      state.kokoroModels.set(key, kokoro);
+      return { model: kokoro, loadMs, cached: false };
+    }
+
+    async function generateKokoroBrowser(model, common) {
+      const loaded = await getKokoroBrowserModel(model);
+      const start = performance.now();
+      const audio = await loaded.model.generate(common.text, {
+        voice: common.voice || model.voice || 'am_adam',
+        speed: common.speed,
+      });
+      const genTimeMs = performance.now() - start;
+      return normalizedResult(model, audio.audio, 24000, genTimeMs, loaded.loadMs, loaded.cached);
+    }
+
+    async function generateModel(model, common) {
+      if (model.family === 'kokoro' && model.backend === 'node-cpu') {
+        return generateKokoroNode(model, common);
+      }
+      if (model.family === 'kokoro') {
+        return generateKokoroBrowser(model, common);
+      }
+      if (model.family === 'supertonic') {
+        return generateSupertonic(model, common);
+      }
+      return generateKitten(model, common);
+    }
+
+    async function runBenchmark() {
+      const models = selectedModels();
+      if (models.length === 0) {
+        setStatus('Select at least one model.', 'error');
+        return;
+      }
+
+      const text = $('text-input').value.trim();
+      if (!text) {
+        setStatus('Enter text to synthesize.', 'error');
+        return;
+      }
+
+      clearStatus();
+      $('run-btn').disabled = true;
+      $('clear-btn').disabled = true;
+      $('empty-state').classList.add('hidden');
+      $('table-wrap').classList.remove('hidden');
+      $('results-body').innerHTML = models.map((model) => rowTemplate(model.id, model)).join('');
+      state.rows = new Map([...document.querySelectorAll('[data-row-id]')].map((row) => [row.dataset.rowId, row]));
+      state.audio.clear();
+      const results = [];
+
+      for (const model of models) {
+        const familyOptions = getFamilyOptions(model.family || 'kitten');
+        const common = {
+          ...familyOptions,
+          text,
+        };
+        setCell(model.id, 'status', 'Loading', 'warn');
+        setStatus(`Generating ${model.label}...`);
+        try {
+          const result = await generateModel(model, common);
+          const samples = result.browserSamples;
+          state.audio.set(model.id, {
+            samples,
+            sampleRate: result.sampleRate,
+            playbackGain: result.playbackGain || 1,
+            fileBase: `${model.family || 'kitten'}-${model.id}-${common.voice || model.voice || 'voice'}-${Date.now()}`,
+          });
+          setCell(model.id, 'status', result.model.cached ? 'Cached' : 'Ready', 'good');
+          setCell(model.id, 'threading', threadingLabel(model, result));
+          setCell(model.id, 'load', result.model.cached ? 'cached' : fmtMs(result.model.loadMs));
+          setCell(model.id, 'gen', fmtMs(result.genTimeMs));
+          setCell(model.id, 'duration', fmtDuration(result.audioDurationSec));
+          setCell(model.id, 'rtf', `${result.rtf.toFixed(2)}x`, rtfClass(result.rtf));
+          setCell(model.id, 'rms', result.rms.toFixed(6));
+          setCell(model.id, 'peak', result.peak.toFixed(6), result.peak >= 1 ? 'bad' : '');
+          setCell(model.id, 'clip', String(result.clipCount), result.clipCount > 0 || result.nanCount > 0 ? 'bad' : 'good');
+          setCell(model.id, 'gain', `${(result.playbackGain || 1).toFixed(3)}x`, result.playbackGain < 1 ? 'warn' : '');
+          setActionsEnabled(model.id, true);
+          results.push(result);
+        } catch (error) {
+          setCell(model.id, 'status', error.message, 'bad');
+        }
+      }
+
+      renderSummary(results);
+      if (results.length === 0) {
+        setStatus('No samples were generated.', 'error');
+      }
+      $('run-btn').disabled = false;
+      $('clear-btn').disabled = false;
+    }
+
+    function clearResults() {
+      state.audio.clear();
+      state.rows.clear();
+      $('results-body').innerHTML = '';
+      $('table-wrap').classList.add('hidden');
+      $('empty-state').classList.remove('hidden');
+      $('summary-card').classList.add('hidden');
+      $('clear-btn').disabled = true;
+      clearStatus();
+    }
+
+    async function init() {
+      try {
+        const response = await fetch('/api/kitten/config');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        state.config = await response.json();
+        renderOptions(state.config);
+        $('run-btn').disabled = false;
+      } catch (error) {
+        setStatus(`Could not load Kitten config: ${error.message}`, 'error');
+      }
+    }
+
+    $('message-select').addEventListener('change', () => {
+      const id = $('message-select').value;
+      if (id === 'custom') {
+        saveSettings();
+        return;
+      }
+      const message = state.config?.messages.find((item) => item.id === id);
+      if (message) $('text-input').value = message.text;
+      saveSettings();
+    });
+
+    $('text-input').addEventListener('input', () => {
+      $('message-select').value = 'custom';
+      saveSettings();
+    });
+
+    $('model-list').addEventListener('change', saveSettings);
+    $('family-controls').addEventListener('input', (event) => {
+      const speed = event.target.closest('[data-family-speed]');
+      if (speed) {
+        const family = speed.dataset.familySpeed;
+        const value = document.querySelector(`[data-family-speed-value="${family}"]`);
+        const control = state.config?.familyControls?.[family];
+        if (value) value.textContent = formatSpeed(speed.value, control?.speed?.step);
+      }
+      const steps = event.target.closest('[data-family-steps]');
+      if (steps) {
+        const family = steps.dataset.familySteps;
+        const value = document.querySelector(`[data-family-steps-value="${family}"]`);
+        if (value) value.textContent = String(Math.round(Number(steps.value)));
+      }
+      saveSettings();
+    });
+    $('family-controls').addEventListener('change', saveSettings);
+    $('effect-select').addEventListener('change', saveSettings);
+    $('run-btn').addEventListener('click', runBenchmark);
+    $('clear-btn').addEventListener('click', clearResults);
+    $('results-body').addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      if (button.dataset.action === 'play') playAudio(button.dataset.id);
+      if (button.dataset.action === 'download') downloadAudio(button.dataset.id);
+    });
+
+    init();
+  </script>
+</body>
+</html>
